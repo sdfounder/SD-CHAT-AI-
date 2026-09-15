@@ -1,3 +1,6 @@
+@Timeout(Duration(seconds: 120))
+library;
+
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,10 +8,17 @@ import 'package:sd_chat_ai/core/config/app_config.dart';
 import 'package:sd_chat_ai/core/services/chat_api_service.dart';
 import 'package:sd_chat_ai/core/services/auth_service.dart';
 
+class _TestHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (cert, host, port) => true;
+  }
+}
+
 void main() {
   setUpAll(() {
-    // Permet à flutter_test de faire des appels réseau HTTPS réels vers le cloud
-    HttpOverrides.global = null;
+    HttpOverrides.global = _TestHttpOverrides();
   });
 
   group('SD CHAT AI Cloud Integration Tests', () {

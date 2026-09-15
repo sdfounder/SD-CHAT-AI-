@@ -2,6 +2,8 @@ import logging
 import time
 import threading
 import urllib.parse
+import socket
+import ssl
 from contextlib import contextmanager
 import pg8000.native
 from app.core.config import settings
@@ -27,15 +29,26 @@ class DatabaseConnectionManager:
         self._database = parsed.path.lstrip("/") or "postgres"
 
     def _create_connection(self) -> pg8000.native.Connection:
-        """Ouvre une nouvelle connexion vers le pooler PostgreSQL."""
+        """Ouvre une nouvelle connexion vers le pooler PostgreSQL avec SSL et résolution DNS directe."""
         self._refresh_config()
+        target_host = self._host
+        try:
+            target_host = socket.gethostbyname(self._host)
+        except Exception:
+            pass
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         return pg8000.native.Connection(
             user=self._user,
             password=self._password,
-            host=self._host,
+            host=target_host,
             port=self._port,
             database=self._database,
-            timeout=15,
+            ssl_context=ctx,
+            timeout=20,
         )
 
     def get_connection(self) -> pg8000.native.Connection:
@@ -46,27 +59,30 @@ class DatabaseConnectionManager:
     def connect(self):
         """Context manager qui réutilise la connexion active pour un temps de réponse instantané (<300ms au lieu de ~9s)."""
         with self._lock:
-            now = time.time()
-            if self._conn is None or (now - self._last_used > 60):
-                if self._conn:
+            if self._conn is not None:
+                try:
+                    self._conn.run("SELECT 1")
+                except Exception:
                     try:
                         self._conn.close()
                     except Exception:
                         pass
+                    self._conn = None
+
+            if self._conn is None:
                 self._conn = self._create_connection()
 
             try:
                 self._last_used = time.time()
                 yield self._conn
             except Exception as e:
-                logger.warning("Erreur connexion active (%s), reconnexion...", e)
+                logger.warning("Erreur connexion active (%s), reinitialisation...", e)
                 try:
                     self._conn.close()
                 except Exception:
                     pass
-                self._conn = self._create_connection()
-                self._last_used = time.time()
-                yield self._conn
+                self._conn = None
+                raise
 
 
 db_manager = DatabaseConnectionManager()
