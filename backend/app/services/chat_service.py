@@ -62,15 +62,28 @@ class ChatService:
                     detail="Conversation introuvable ou non autorisée",
                 )
 
-        # 2. Sauvegarde du message utilisateur
-        ChatRepository.save_message(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            role="user",
-            content=request.content,
-            tokens_used=len(request.content.split()),
-            model=request.model
-        )
+        # 2. Sauvegarde ou mise à jour du message utilisateur
+        if request.edit_message_id:
+            edited = ChatRepository.edit_and_truncate_after(
+                conversation_id=conversation_id,
+                message_id=request.edit_message_id,
+                user_id=user_id,
+                new_content=request.content
+            )
+            if not edited:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Message à modifier introuvable dans cette conversation",
+                )
+        else:
+            ChatRepository.save_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role="user",
+                content=request.content,
+                tokens_used=len(request.content.split()),
+                model=request.model
+            )
 
         # Émettre le premier événement pour informer le client de l'ID conversation
         init_event = {

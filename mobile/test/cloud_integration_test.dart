@@ -33,7 +33,6 @@ void main() {
     test('2. Fetch conversations via HTTPS Cloud URL', () async {
       final conversations = await chatApiService.fetchConversations();
       expect(conversations, isNotNull);
-      // Conversations must be a List (persisted in Supabase SD-DEV)
       expect(conversations, isA<List>());
     });
 
@@ -44,7 +43,7 @@ void main() {
       String? returnedMessageId;
       String? errorMessage;
 
-      await chatApiService.streamChatMessage(
+      chatApiService.streamChatMessage(
         content: 'Donne-moi 3 mots inspirants pour SD.',
         onInit: (convId, title) {
           conversationId = convId;
@@ -76,6 +75,47 @@ void main() {
       expect(tokens, isNotEmpty);
       final fullResponse = tokens.join('');
       expect(fullResponse.trim().length, greaterThan(3));
+    });
+
+    test('4. Rename and Archive conversation on Supabase SD-DEV', () async {
+      // Créer une conversation
+      final created = await chatApiService.createConversation(
+        title: 'Discussion Temporaire Test',
+      );
+      expect(created, isNotNull);
+      final convId = created!.id;
+
+      // Renommer
+      final renameSuccess = await chatApiService.updateConversation(
+        convId,
+        title: 'Discussion Renommée SD',
+      );
+      expect(renameSuccess, isTrue);
+
+      // Archiver
+      final archiveSuccess = await chatApiService.updateConversation(
+        convId,
+        isArchived: true,
+      );
+      expect(archiveSuccess, isTrue);
+
+      // Supprimer
+      final deleteSuccess = await chatApiService.deleteConversation(convId);
+      expect(deleteSuccess, isTrue);
+    });
+
+    test('5. Stop generation handle cancels client connection', () async {
+      final handle = chatApiService.streamChatMessage(
+        content: 'Raconte une longue histoire détaillée de 10 paragraphes sur la conquête spatiale.',
+        onInit: (convId, title) {},
+        onToken: (token) {},
+        onDone: (msgId, title) {},
+        onError: (err) {},
+      );
+
+      expect(handle.isCancelled, isFalse);
+      handle.cancel();
+      expect(handle.isCancelled, isTrue);
     });
   });
 }

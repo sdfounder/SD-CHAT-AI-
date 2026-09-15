@@ -8,12 +8,14 @@ class ConversationsDrawer extends StatefulWidget {
   final String? activeConversationId;
   final ValueChanged<Conversation> onSelectConversation;
   final VoidCallback onNewChat;
+  final ValueChanged<String>? onConversationRenamed;
 
   const ConversationsDrawer({
     super.key,
     required this.activeConversationId,
     required this.onSelectConversation,
     required this.onNewChat,
+    this.onConversationRenamed,
   });
 
   @override
@@ -24,8 +26,9 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
   final ChatApiService _chatApi = ChatApiService();
   final AuthService _auth = AuthService();
 
-  List<Conversation> _conversations = [];
+  List<Conversation> _allConversations = [];
   bool _isLoading = true;
+  bool _showArchived = false;
 
   @override
   void initState() {
@@ -35,12 +38,98 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
 
   Future<void> _loadConversations() async {
     setState(() => _isLoading = true);
-    final list = await _chatApi.fetchConversations();
+    // Charger toutes les conversations (actives et archivées)
+    final list = await _chatApi.fetchConversations(includeArchived: true);
     if (mounted) {
       setState(() {
-        _conversations = list;
+        _allConversations = list;
         _isLoading = false;
       });
+    }
+  }
+
+  List<Conversation> get _displayedConversations {
+    return _allConversations
+        .where((c) => c.isArchived == _showArchived)
+        .toList();
+  }
+
+  Future<void> _renameConversation(Conversation conv) async {
+    final controller = TextEditingController(text: conv.title);
+
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: SDChatColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Renommer la conversation',
+          style: TextStyle(color: SDChatColors.textPrimary, fontSize: 16),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: SDChatColors.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Titre de la conversation',
+            hintStyle: const TextStyle(color: SDChatColors.textMuted),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: SDChatColors.primary.withValues(alpha: 0.5)),
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: SDChatColors.primary),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Annuler', style: TextStyle(color: SDChatColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Enregistrer', style: TextStyle(color: SDChatColors.primary, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (newTitle != null && newTitle.isNotEmpty && newTitle != conv.title) {
+      final success = await _chatApi.updateConversation(conv.id, title: newTitle);
+      if (success && mounted) {
+        setState(() {
+          final index = _allConversations.indexWhere((c) => c.id == conv.id);
+          if (index != -1) {
+            _allConversations[index] = _allConversations[index].copyWith(title: newTitle);
+          }
+        });
+        widget.onConversationRenamed?.call(newTitle);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conversation renommée'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleArchive(Conversation conv) async {
+    final newArchivedState = !conv.isArchived;
+    final success = await _chatApi.updateConversation(conv.id, isArchived: newArchivedState);
+    if (success && mounted) {
+      setState(() {
+        final index = _allConversations.indexWhere((c) => c.id == conv.id);
+        if (index != -1) {
+          _allConversations[index] = _allConversations[index].copyWith(isArchived: newArchivedState);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(newArchivedState ? 'Discussion archivée' : 'Discussion désarchivée'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
     }
   }
 
@@ -52,7 +141,7 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Supprimer la conversation ?'),
         content: Text(
-          'Cette action supprimera définitivement "${conv.title}" et tous ses messages.',
+          'Cette action supprimera définitivement "${conv.title}" et tous ses messages de Supabase.',
           style: const TextStyle(color: SDChatColors.textSecondary),
         ),
         actions: [
@@ -72,8 +161,11 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
       final success = await _chatApi.deleteConversation(conv.id);
       if (success && mounted) {
         setState(() {
-          _conversations.removeWhere((c) => c.id == conv.id);
+          _allConversations.removeWhere((c) => c.id == conv.id);
         });
+        if (widget.activeConversationId == conv.id) {
+          widget.onNewChat();
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Conversation supprimée'),
@@ -86,6 +178,10 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final displayedList = _displayedConversations;
+    final archivedCount = _allConversations.where((c) => c.isArchived).length;
+    final activeCount = _allConversations.where((c) => !c.isArchived).length;
+
     return Drawer(
       backgroundColor: SDChatColors.canvas,
       child: SafeArea(
@@ -93,7 +189,7 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
           children: [
             // Bouton "+ Nouveau Chat"
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
               child: InkWell(
                 onTap: () {
                   Navigator.pop(context);
@@ -129,7 +225,31 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
               ),
             ),
 
-            const Divider(color: SDChatColors.borderSubtle),
+            // Sélecteur Onglets : Discussions Actives / Archives
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 4.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildFilterChip(
+                      label: 'Actives ($activeCount)',
+                      isSelected: !_showArchived,
+                      onTap: () => setState(() => _showArchived = false),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildFilterChip(
+                      label: 'Archives ($archivedCount)',
+                      isSelected: _showArchived,
+                      onTap: () => setState(() => _showArchived = true),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(color: SDChatColors.borderSubtle, height: 16),
 
             // Liste de l'historique
             Expanded(
@@ -140,11 +260,13 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                         color: SDChatColors.primary,
                       ),
                     )
-                  : _conversations.isEmpty
-                      ? const Center(
+                  : displayedList.isEmpty
+                      ? Center(
                           child: Text(
-                            'Aucune discussion enregistrée',
-                            style: TextStyle(
+                            _showArchived
+                                ? 'Aucune discussion archivée'
+                                : 'Aucune discussion enregistrée',
+                            style: const TextStyle(
                               color: SDChatColors.textMuted,
                               fontSize: 13,
                             ),
@@ -155,10 +277,10 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                           backgroundColor: SDChatColors.surface,
                           onRefresh: _loadConversations,
                           child: ListView.builder(
-                            itemCount: _conversations.length,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            itemCount: displayedList.length,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             itemBuilder: (context, index) {
-                              final conv = _conversations[index];
+                              final conv = displayedList[index];
                               final isActive = conv.id == widget.activeConversationId;
 
                               return Container(
@@ -179,6 +301,7 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                                 ),
                                 child: ListTile(
                                   dense: true,
+                                  contentPadding: const EdgeInsets.only(left: 12, right: 4),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -196,11 +319,66 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                                           : FontWeight.w400,
                                     ),
                                   ),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete_outline_rounded, size: 16),
-                                    color: SDChatColors.textDisabled,
-                                    tooltip: 'Supprimer',
-                                    onPressed: () => _deleteConversation(conv),
+                                  trailing: PopupMenuButton<String>(
+                                    icon: const Icon(Icons.more_vert_rounded, size: 18, color: SDChatColors.textMuted),
+                                    color: SDChatColors.surface,
+                                    elevation: 4,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: const BorderSide(color: SDChatColors.borderMedium, width: 0.8),
+                                    ),
+                                    onSelected: (value) {
+                                      switch (value) {
+                                        case 'rename':
+                                          _renameConversation(conv);
+                                          break;
+                                        case 'archive':
+                                          _toggleArchive(conv);
+                                          break;
+                                        case 'delete':
+                                          _deleteConversation(conv);
+                                          break;
+                                      }
+                                    },
+                                    itemBuilder: (ctx) => [
+                                      const PopupMenuItem(
+                                        value: 'rename',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.edit_outlined, size: 16, color: SDChatColors.textSecondary),
+                                            SizedBox(width: 8),
+                                            Text('Renommer', style: TextStyle(color: SDChatColors.textPrimary, fontSize: 13)),
+                                          ],
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'archive',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              conv.isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
+                                              size: 16,
+                                              color: SDChatColors.textSecondary,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              conv.isArchived ? 'Désarchiver' : 'Archiver',
+                                              style: const TextStyle(color: SDChatColors.textPrimary, fontSize: 13),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.delete_outline_rounded, size: 16, color: SDChatColors.error),
+                                            SizedBox(width: 8),
+                                            Text('Supprimer', style: TextStyle(color: SDChatColors.error, fontSize: 13)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   onTap: () {
                                     Navigator.pop(context);
@@ -213,7 +391,7 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                         ),
             ),
 
-            const Divider(color: SDChatColors.borderSubtle),
+            const Divider(color: SDChatColors.borderSubtle, height: 1),
 
             // Pied de page Utilisateur & Déconnexion
             Padding(
@@ -268,6 +446,37 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected ? SDChatColors.surfaceHighlight : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? SDChatColors.primary.withValues(alpha: 0.5) : SDChatColors.borderSubtle,
+            width: 0.8,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? SDChatColors.primary : SDChatColors.textMuted,
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+          ),
         ),
       ),
     );

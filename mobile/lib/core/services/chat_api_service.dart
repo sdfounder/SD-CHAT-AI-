@@ -92,17 +92,26 @@ class ChatApiService {
     return null;
   }
 
-  /// Renommer une conversation
-  Future<bool> updateConversation(String conversationId,
-      {String? title}) async {
+  /// Renommer, archiver ou épingler une conversation
+  Future<bool> updateConversation(
+    String conversationId, {
+    String? title,
+    bool? isArchived,
+    bool? isPinned,
+  }) async {
     final uri = Uri.parse(
       '${AppConfig.apiBaseUrl}/v1/conversations/$conversationId',
     );
     try {
+      final Map<String, dynamic> body = {};
+      if (title != null) body['title'] = title;
+      if (isArchived != null) body['is_archived'] = isArchived;
+      if (isPinned != null) body['is_pinned'] = isPinned;
+
       final response = await http.patch(
         uri,
         headers: _headers,
-        body: jsonEncode({'title': ?title}),
+        body: jsonEncode(body),
       );
       return response.statusCode == 200;
     } catch (e) {
@@ -125,82 +134,128 @@ class ChatApiService {
     }
   }
 
+  /// Vérifier l'état et la connectivité du backend Cloud
+  Future<Map<String, dynamic>?> checkHealth() async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/health');
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('Health check exception: $e');
+    }
+    return null;
+  }
+
   /// Envoyer un message et recevoir les tokens en streaming Server-Sent Events (SSE)
-  Future<void> streamChatMessage({
+  /// Retourne un [ChatStreamHandle] permettant d'interrompre la génération à tout moment.
+  ChatStreamHandle streamChatMessage({
     String? conversationId,
     required String content,
+    String? editMessageId,
     String model = AppConfig.defaultModel,
     required void Function(String convId, String? title) onInit,
     required void Function(String token) onToken,
     required void Function(String? messageId, String? title) onDone,
     required void Function(String error) onError,
-  }) async {
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/chat/stream');
+  }) {
     final client = http.Client();
+    final handle = ChatStreamHandle(client);
 
-    try {
-      final request = http.Request('POST', uri)
-        ..headers.addAll({
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-          'Authorization': 'Bearer ${_auth.accessToken ?? ""}',
-        })
-        ..body = jsonEncode({
-          'conversation_id': ?conversationId,
+    () async {
+      try {
+        final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/chat/stream');
+        final Map<String, dynamic> body = {
+          'conversation_id': conversationId,
           'content': content,
           'model': model,
-        });
+        };
+        if (editMessageId != null) {
+          body['edit_message_id'] = editMessageId;
+        }
 
-      final streamedResponse = await client.send(request);
+        final request = http.Request('POST', uri)
+          ..headers.addAll({
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+            'Authorization': 'Bearer ${_auth.accessToken ?? ""}',
+          })
+          ..body = jsonEncode(body);
 
-      if (streamedResponse.statusCode != 200) {
-        final errBody = await streamedResponse.stream.bytesToString();
-        onError('Erreur serveur (${streamedResponse.statusCode}): $errBody');
-        client.close();
-        return;
-      }
+        final streamedResponse = await client.send(request);
 
-      String buffer = '';
-      await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
-        buffer += chunk;
-        while (buffer.contains('\n\n')) {
-          final eventEnd = buffer.indexOf('\n\n');
-          final eventString = buffer.substring(0, eventEnd).trim();
-          buffer = buffer.substring(eventEnd + 2);
+        if (streamedResponse.statusCode != 200) {
+          if (!handle.isCancelled) {
+            final errBody = await streamedResponse.stream.bytesToString();
+            onError('Erreur serveur (${streamedResponse.statusCode}): $errBody');
+          }
+          client.close();
+          return;
+        }
 
-          if (eventString.startsWith('data: ')) {
-            final jsonStr = eventString.substring(6).trim();
-            if (jsonStr.isEmpty) continue;
+        String buffer = '';
+        await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
+          if (handle.isCancelled) break;
+          buffer += chunk;
+          while (buffer.contains('\n\n')) {
+            final eventEnd = buffer.indexOf('\n\n');
+            final eventString = buffer.substring(0, eventEnd).trim();
+            buffer = buffer.substring(eventEnd + 2);
 
-            try {
-              final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-              final String? convId = data['conversation_id'] as String?;
-              final String? title = data['title'] as String?;
-              final String token = data['token'] as String? ?? '';
-              final bool isDone = data['done'] as bool? ?? false;
-              final String? messageId = data['message_id'] as String?;
+            if (eventString.startsWith('data: ')) {
+              final jsonStr = eventString.substring(6).trim();
+              if (jsonStr.isEmpty) continue;
 
-              if (convId != null) {
-                onInit(convId, title);
+              try {
+                final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+                final String? convId = data['conversation_id'] as String?;
+                final String? title = data['title'] as String?;
+                final String token = data['token'] as String? ?? '';
+                final bool isDone = data['done'] as bool? ?? false;
+                final String? messageId = data['message_id'] as String?;
+
+                if (convId != null) {
+                  onInit(convId, title);
+                }
+
+                if (token.isNotEmpty && !handle.isCancelled) {
+                  onToken(token);
+                }
+
+                if (isDone) {
+                  onDone(messageId, title);
+                }
+              } catch (e) {
+                debugPrint('Error parsing SSE event: $e');
               }
-
-              if (token.isNotEmpty) {
-                onToken(token);
-              }
-
-              if (isDone) {
-                onDone(messageId, title);
-              }
-            } catch (e) {
-              debugPrint('Error parsing SSE event: $e');
             }
           }
         }
+      } catch (e) {
+        if (!handle.isCancelled) {
+          onError('Erreur de connexion: $e');
+        }
+      } finally {
+        client.close();
       }
-    } catch (e) {
-      onError('Erreur de connexion: $e');
-    } finally {
-      client.close();
-    }
+    }();
+
+    return handle;
+  }
+}
+
+/// Handle permettant d'annuler ou d'arrêter une génération SSE en cours
+class ChatStreamHandle {
+  final http.Client _client;
+  bool _isCancelled = false;
+
+  ChatStreamHandle(this._client);
+
+  bool get isCancelled => _isCancelled;
+
+  void cancel() {
+    _isCancelled = true;
+    _client.close();
   }
 }

@@ -54,6 +54,10 @@ class SendMessageRequest(BaseModel):
     model: Optional[str] = Field(default="gemini-3.6-flash", description="Modèle IA cible")
     system_prompt: Optional[str] = Field(default=None, description="Consigne de rôle ou personnalisation")
     temperature: Optional[float] = Field(default=0.7, ge=0.0, le=1.0)
+    edit_message_id: Optional[str] = Field(
+        default=None,
+        description="ID du message utilisateur à modifier pour régénérer la réponse à partir de ce point."
+    )
 
 
 class StreamTokenChunk(BaseModel):

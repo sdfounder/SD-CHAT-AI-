@@ -267,3 +267,65 @@ class ChatRepository:
                 "model": r[6],
                 "created_at": r[7]
             }
+
+    @staticmethod
+    def edit_and_truncate_after(
+        conversation_id: str,
+        message_id: str,
+        user_id: str,
+        new_content: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Modifie le message utilisateur et supprime tous les messages postérieurs pour régénérer la conversation."""
+        with db_manager.connect() as conn:
+            # 1. Vérifier le message et récupérer sa date
+            target = conn.run(
+                """
+                SELECT id, created_at, role
+                FROM public.chat_messages
+                WHERE id = :mid AND conversation_id = :cid AND user_id = :uid
+                """,
+                mid=message_id,
+                cid=conversation_id,
+                uid=user_id
+            )
+            if not target:
+                return None
+
+            created_at = target[0][1]
+
+            # 2. Supprimer tous les messages strictement postérieurs dans cette discussion
+            conn.run(
+                """
+                DELETE FROM public.chat_messages
+                WHERE conversation_id = :cid AND created_at > :created_at
+                """,
+                cid=conversation_id,
+                created_at=created_at
+            )
+
+            # 3. Mettre à jour le message cible avec le nouveau contenu
+            tokens = len(new_content.split())
+            rows = conn.run(
+                """
+                UPDATE public.chat_messages
+                SET content = :content, tokens_used = :tokens
+                WHERE id = :mid
+                RETURNING id, conversation_id, user_id, role, content, tokens_used, model, created_at
+                """,
+                content=new_content,
+                tokens=tokens,
+                mid=message_id
+            )
+            if not rows:
+                return None
+            r = rows[0]
+            return {
+                "id": str(r[0]),
+                "conversation_id": str(r[1]),
+                "user_id": str(r[2]),
+                "role": r[3],
+                "content": r[4],
+                "tokens_used": int(r[5] or 0),
+                "model": r[6],
+                "created_at": r[7]
+            }

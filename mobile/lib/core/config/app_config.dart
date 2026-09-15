@@ -8,7 +8,7 @@ class AppConfig {
   // Communique directement via HTTPS sans passer par localhost
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://40f186bbe1e837.lhr.life/api',
+    defaultValue: 'https://framework-ala-symantec-deeply.trycloudflare.com/api',
   );
 
   // Configuration Supabase SD-DEV (Authentification Google uniquement)

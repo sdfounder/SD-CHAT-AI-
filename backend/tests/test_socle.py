@@ -115,3 +115,56 @@ def test_real_gemini_streaming_sse():
 
     # Nettoyage
     client.delete(f"/api/v1/conversations/{conv_id}", headers=AUTH_HEADERS)
+
+
+def test_edit_message_and_regenerate():
+    # 1. Créer une conversation
+    create_resp = client.post(
+        "/api/v1/conversations",
+        headers=AUTH_HEADERS,
+        json={"title": "Test Modification et Régénération"}
+    )
+    assert create_resp.status_code == 201
+    conv_id = create_resp.json()["id"]
+
+    # 2. Envoyer premier message
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=AUTH_HEADERS,
+        json={"conversation_id": conv_id, "content": "Premier message original."}
+    ) as r1:
+        for _ in r1.iter_lines():
+            pass
+
+    # Vérifier 2 messages (user + assistant)
+    d1 = client.get(f"/api/v1/conversations/{conv_id}", headers=AUTH_HEADERS).json()
+    assert len(d1["messages"]) == 2
+    user_msg_id = d1["messages"][0]["id"]
+    assert d1["messages"][0]["content"] == "Premier message original."
+
+    # 3. Modifier le premier message et régénérer
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=AUTH_HEADERS,
+        json={
+            "conversation_id": conv_id,
+            "content": "Message modifié avec succès.",
+            "edit_message_id": user_msg_id
+        }
+    ) as r2:
+        for _ in r2.iter_lines():
+            pass
+
+    # Vérifier que le message utilisateur a été mis à jour et que la réponse a été régénérée
+    d2 = client.get(f"/api/v1/conversations/{conv_id}", headers=AUTH_HEADERS).json()
+    assert len(d2["messages"]) == 2
+    assert d2["messages"][0]["id"] == user_msg_id
+    assert d2["messages"][0]["content"] == "Message modifié avec succès."
+    assert d2["messages"][1]["role"] == "assistant"
+    assert len(d2["messages"][1]["content"]) > 0
+
+    # Nettoyage
+    client.delete(f"/api/v1/conversations/{conv_id}", headers=AUTH_HEADERS)
+
