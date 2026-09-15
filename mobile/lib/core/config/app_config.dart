@@ -8,7 +8,7 @@ class AppConfig {
   // Communique directement via HTTPS sans passer par localhost
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://wpcdz-197-149-244-22.free.pinggy.net/api',
+    defaultValue: 'https://bwmxy-197-149-244-22.free.pinggy.net/api',
   );
 
   // Configuration Supabase SD-DEV (Authentification Google uniquement)
