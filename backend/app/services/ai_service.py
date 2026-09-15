@@ -1,18 +1,25 @@
 class AIService:
     """
-    Première version du cerveau de SD CHAT AI.
-    Pour l'instant, il renvoie une réponse fixe.
-    Plus tard, il utilisera un véritable modèle d'IA.
+    Service IA de SD CHAT AI
+    Version 0.2 : gestion du contexte conversationnel.
     """
 
     @staticmethod
-    def generate_response(user_message: str) -> str:
-        user_message = user_message.strip()
+    def generate_response(user_message: str, conversation_history: list) -> str:
 
-        if not user_message:
+        if not user_message.strip():
             return "Je n'ai reçu aucun message."
 
+        history_count = len(conversation_history)
+
+        last_role = "aucun"
+        if history_count > 0:
+            last_role = conversation_history[-1].get("role", "inconnu")
+
         return (
-            "Bonjour, je suis SD CHAT AI et je suis votre IA personnelle. "
-            "Je suis encore en cours de développement, mais chaque jour j'apprends de nouvelles fonctionnalités."
+            f"Bonjour, je suis SD CHAT AI.\n\n"
+            f"Tu m'as envoyé : '{user_message}'.\n"
+            f"La conversation contient actuellement {history_count} message(s).\n"
+            f"Le dernier message enregistré est de : {last_role}.\n\n"
+            f"Mon véritable moteur d'intelligence artificielle sera bientôt connecté."
         )

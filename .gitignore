@@ -1,0 +1,36 @@
+# Python & Virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/venv/
+backend/env/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/.idea/
+mobile/*.iml
+mobile/android/local.properties
+mobile/android/.gradle/
+
+# Secrets & Environment
+*.env
+*.env.local
+*.env.development.local
+*.env.production.local
+!*.env.example
+!*.env.development.example
+!*.env.production.example
+
+# OS files
+.DS_Store
+Thumbs.db
