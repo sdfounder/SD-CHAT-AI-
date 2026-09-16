@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from app.core.security import get_current_user, AuthenticatedUser
 from app.schemas.chat_schemas import SendMessageRequest
 from app.services.chat_service import ChatService
+from app.services.quota_service import QuotaService
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,14 @@ async def stream_chat_message(
 ):
     """
     Point d'entrée principal pour la discussion IA :
-    Reçoit le message de l'utilisateur, déclenche l'IA (Gemini V1) et renvoie
-    les morceaux de texte en flux continu (Server-Sent Events).
+    1. Vérifie et décompte le quota du plan (Free: 20/j, Premium: 500/j).
+       Si le quota est atteint, lève immédiatement HTTP 429 Too Many Requests.
+    2. Reçoit le message de l'utilisateur, déclenche l'IA (Gemini V1) et renvoie
+       les morceaux de texte en flux continu (Server-Sent Events).
     """
+    # Contrôle strict du quota utilisateur avant d'initier la réponse IA
+    QuotaService.check_and_consume_message_quota(current_user.id)
+
     return StreamingResponse(
         ChatService.stream_chat(current_user, request),
         media_type="text/event-stream",
@@ -34,3 +40,4 @@ async def stream_chat_message(
             "X-Accel-Buffering": "no",
         }
     )
+

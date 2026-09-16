@@ -5,10 +5,12 @@ import '../../../core/services/chat_api_service.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/chat_message.dart';
 import '../../../shared/models/chat_attachment.dart';
+import '../../../shared/models/user_quota.dart';
 import '../widgets/chat_input_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/typing_indicator.dart';
 import '../widgets/empty_chat_hero.dart';
+import '../widgets/quota_dialog.dart';
 import '../../conversations/widgets/conversations_drawer.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -35,10 +37,14 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _lastErrorMessage;
   String? _lastFailedPrompt;
 
+  // Statut Quotas et Entitlements Free / Premium
+  UserQuota? _userQuota;
+
   @override
   void initState() {
     super.initState();
     _checkBackendConnection();
+    _loadUserQuota();
   }
 
   @override
@@ -46,6 +52,15 @@ class _ChatScreenState extends State<ChatScreen> {
     _currentStreamHandle?.cancel();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUserQuota() async {
+    final quota = await _chatApi.fetchUserQuota();
+    if (mounted && quota != null) {
+      setState(() {
+        _userQuota = quota;
+      });
+    }
   }
 
   Future<void> _checkBackendConnection() async {
@@ -211,18 +226,34 @@ class _ChatScreenState extends State<ChatScreen> {
             }
           });
           _scrollToBottom();
+          _loadUserQuota();
         }
       },
       onError: (errorMsg) {
         if (mounted) {
+          final isQuotaErr = errorMsg.contains('QUOTA_EXCEEDED') ||
+              errorMsg.contains('ATTACHMENTS_QUOTA_EXCEEDED') ||
+              errorMsg.toLowerCase().contains('quota') ||
+              errorMsg.contains('429');
+
           setState(() {
             assistantMessage.isStreaming = false;
             _isStreaming = false;
             _lastErrorMessage = errorMsg;
             _lastFailedPrompt = text;
-            _isBackendConnected = false;
+            if (!isQuotaErr) {
+              _isBackendConnected = false;
+            }
           });
           _scrollToBottom();
+
+          if (isQuotaErr) {
+            _loadUserQuota().then((_) {
+              if (mounted && _userQuota != null) {
+                QuotaDialog.show(context, _userQuota!, onRefresh: _loadUserQuota);
+              }
+            });
+          }
         }
       },
     );
@@ -355,6 +386,64 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
+          if (_userQuota != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+              child: InkWell(
+                onTap: () => QuotaDialog.show(context, _userQuota!, onRefresh: _loadUserQuota),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _userQuota!.isPremium
+                        ? SDChatColors.primary.withValues(alpha: 0.15)
+                        : (_userQuota!.isQuotaExceeded
+                            ? SDChatColors.error.withValues(alpha: 0.15)
+                            : SDChatColors.surfaceHighlight),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _userQuota!.isPremium
+                          ? SDChatColors.primary.withValues(alpha: 0.6)
+                          : (_userQuota!.isQuotaExceeded
+                              ? SDChatColors.error.withValues(alpha: 0.5)
+                              : SDChatColors.borderSubtle),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _userQuota!.isPremium
+                            ? Icons.workspace_premium_rounded
+                            : Icons.bolt_rounded,
+                        size: 14,
+                        color: _userQuota!.isPremium
+                            ? SDChatColors.primary
+                            : (_userQuota!.isQuotaExceeded
+                                ? SDChatColors.error
+                                : SDChatColors.textSecondary),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _userQuota!.isPremium
+                            ? 'Premium'
+                            : '${_userQuota!.messagesRemaining}/${_userQuota!.messagesLimit}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: _userQuota!.isPremium
+                              ? SDChatColors.primary
+                              : (_userQuota!.isQuotaExceeded
+                                  ? SDChatColors.error
+                                  : SDChatColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.edit_note_rounded, size: 24, color: SDChatColors.textSecondary),
             tooltip: 'Nouveau chat',

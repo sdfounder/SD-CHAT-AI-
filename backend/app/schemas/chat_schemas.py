@@ -55,6 +55,20 @@ class MessageResponse(BaseModel):
     attachments: List[AttachmentResponse] = []
 
 
+class QuotaStatusResponse(BaseModel):
+    user_id: str
+    plan: str = "free"  # 'free' ou 'premium'
+    is_premium: bool = False
+    messages_limit: int = 20
+    messages_used: int = 0
+    messages_remaining: int = 20
+    attachments_limit: int = 3
+    attachments_used: int = 0
+    attachments_remaining: int = 3
+    is_quota_exceeded: bool = False
+    reset_at: datetime
+
+
 class ConversationDetailResponse(BaseModel):
     conversation: ConversationResponse
     messages: List[MessageResponse]

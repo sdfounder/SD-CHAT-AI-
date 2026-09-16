@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from app.core.security import get_current_user, AuthenticatedUser
 from app.schemas.chat_schemas import AttachmentResponse
 from app.repositories.chat_repository import ChatRepository
+from app.services.quota_service import QuotaService
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,9 @@ async def upload_attachment(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Le fichier dépasse la taille maximale autorisée de 10 Mo.",
         )
+
+    # Contrôle strict du quota journalier de pièces jointes (Free: 3/j, Premium: 50/j)
+    QuotaService.check_and_consume_attachment_quota(current_user.id)
 
     attachment_id = str(uuid.uuid4())
     safe_filename = file.filename.replace("/", "_").replace("\\", "_")

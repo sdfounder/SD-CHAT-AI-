@@ -3,6 +3,8 @@ import '../../../core/theme/sd_chat_colors.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/chat_api_service.dart';
 import '../../../shared/models/conversation.dart';
+import '../../../shared/models/user_quota.dart';
+import '../../chat/widgets/quota_dialog.dart';
 
 class ConversationsDrawer extends StatefulWidget {
   final String? activeConversationId;
@@ -27,6 +29,7 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
   final AuthService _auth = AuthService();
 
   List<Conversation> _allConversations = [];
+  UserQuota? _userQuota;
   bool _isLoading = true;
   bool _showArchived = false;
 
@@ -38,11 +41,15 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
 
   Future<void> _loadConversations() async {
     setState(() => _isLoading = true);
-    // Charger toutes les conversations (actives et archivées)
-    final list = await _chatApi.fetchConversations(includeArchived: true);
+    final results = await Future.wait([
+      _chatApi.fetchConversations(includeArchived: true),
+      _chatApi.fetchUserQuota(),
+    ]);
+
     if (mounted) {
       setState(() {
-        _allConversations = list;
+        _allConversations = results[0] as List<Conversation>;
+        _userQuota = results[1] as UserQuota?;
         _isLoading = false;
       });
     }
@@ -390,6 +397,88 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                           ),
                         ),
             ),
+            if (_userQuota != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pop(context);
+                    QuotaDialog.show(context, _userQuota!, onRefresh: _loadConversations);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _userQuota!.isPremium
+                          ? SDChatColors.primary.withValues(alpha: 0.12)
+                          : SDChatColors.surfaceHighlight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _userQuota!.isPremium
+                            ? SDChatColors.primary.withValues(alpha: 0.5)
+                            : SDChatColors.borderSubtle,
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _userQuota!.isPremium
+                                  ? Icons.workspace_premium_rounded
+                                  : Icons.bolt_rounded,
+                              size: 16,
+                              color: _userQuota!.isPremium
+                                  ? SDChatColors.primary
+                                  : SDChatColors.textSecondary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _userQuota!.isPremium ? 'Plan Premium' : 'Plan Free',
+                              style: TextStyle(
+                                color: _userQuota!.isPremium
+                                    ? SDChatColors.primary
+                                    : SDChatColors.textPrimary,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${_userQuota!.messagesRemaining}/${_userQuota!.messagesLimit} msg',
+                              style: TextStyle(
+                                color: _userQuota!.isQuotaExceeded
+                                    ? SDChatColors.error
+                                    : SDChatColors.textSecondary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(3),
+                          child: LinearProgressIndicator(
+                            value: _userQuota!.messageUsageRatio,
+                            minHeight: 4,
+                            backgroundColor: SDChatColors.background,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              _userQuota!.isQuotaExceeded
+                                  ? SDChatColors.error
+                                  : (_userQuota!.isPremium
+                                      ? SDChatColors.primary
+                                      : SDChatColors.secondary),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             const Divider(color: SDChatColors.borderSubtle, height: 1),
 

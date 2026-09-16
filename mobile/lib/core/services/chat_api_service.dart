@@ -7,6 +7,7 @@ import 'auth_service.dart';
 import '../../shared/models/conversation.dart';
 import '../../shared/models/chat_message.dart';
 import '../../shared/models/chat_attachment.dart';
+import '../../shared/models/user_quota.dart';
 
 class ChatApiService {
   static final ChatApiService _instance = ChatApiService._internal();
@@ -149,6 +150,23 @@ class ChatApiService {
     return null;
   }
 
+  /// Récupérer l'état du quota journalier et le statut d'abonnement (Free vs Premium)
+  Future<UserQuota?> fetchUserQuota() async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/quota');
+    try {
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        return UserQuota.fromJson(data);
+      } else {
+        debugPrint('Fetch quota error (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Exception fetching quota: $e');
+    }
+    return null;
+  }
+
   /// Téléverser une pièce jointe (Image ou Fichier texte)
   Future<ChatAttachment?> uploadAttachment({
     required String filePath,
@@ -175,12 +193,25 @@ class ChatApiService {
         final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
         return ChatAttachment.fromJson(data);
       } else {
-        debugPrint('Upload failed ${response.statusCode}: ${response.body}');
+        String errorMsg = 'Échec du téléversement (${response.statusCode})';
+        try {
+          final errJson = jsonDecode(utf8.decode(response.bodyBytes));
+          if (errJson is Map && errJson.containsKey('detail')) {
+            final detail = errJson['detail'];
+            if (detail is Map && detail.containsKey('message')) {
+              errorMsg = detail['message'] as String;
+            } else if (detail is String) {
+              errorMsg = detail;
+            }
+          }
+        } catch (_) {}
+        debugPrint('Upload failed: $errorMsg');
+        throw Exception(errorMsg);
       }
     } catch (e) {
       debugPrint('Exception uploading attachment: $e');
+      rethrow;
     }
-    return null;
   }
 
   /// Supprimer une pièce jointe
@@ -244,7 +275,21 @@ class ChatApiService {
         if (streamedResponse.statusCode != 200) {
           if (!handle.isCancelled) {
             final errBody = await streamedResponse.stream.bytesToString();
-            onError('Erreur serveur (${streamedResponse.statusCode}): $errBody');
+            String errorMsg = 'Erreur serveur (${streamedResponse.statusCode})';
+            try {
+              final errJson = jsonDecode(errBody);
+              if (errJson is Map && errJson.containsKey('detail')) {
+                final detail = errJson['detail'];
+                if (detail is Map && detail.containsKey('message')) {
+                  errorMsg = detail['message'] as String;
+                } else if (detail is String) {
+                  errorMsg = detail;
+                }
+              }
+            } catch (_) {
+              if (errBody.isNotEmpty) errorMsg = errBody;
+            }
+            onError(errorMsg);
           }
           client.close();
           return;
