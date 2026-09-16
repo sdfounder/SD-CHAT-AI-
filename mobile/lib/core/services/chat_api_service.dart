@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import 'auth_service.dart';
 import '../../shared/models/conversation.dart';
 import '../../shared/models/chat_message.dart';
+import '../../shared/models/chat_attachment.dart';
 
 class ChatApiService {
   static final ChatApiService _instance = ChatApiService._internal();
@@ -148,12 +149,64 @@ class ChatApiService {
     return null;
   }
 
+  /// Téléverser une pièce jointe (Image ou Fichier texte)
+  Future<ChatAttachment?> uploadAttachment({
+    required String filePath,
+    required String fileName,
+    String? conversationId,
+  }) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/attachments/upload');
+    try {
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer ${_auth.accessToken ?? ""}';
+      if (conversationId != null) {
+        request.fields['conversation_id'] = conversationId;
+      }
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        filePath,
+        filename: fileName,
+      ));
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 201) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        return ChatAttachment.fromJson(data);
+      } else {
+        debugPrint('Upload failed ${response.statusCode}: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Exception uploading attachment: $e');
+    }
+    return null;
+  }
+
+  /// Supprimer une pièce jointe
+  Future<bool> deleteAttachment(String attachmentId) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/v1/attachments/$attachmentId');
+    try {
+      final response = await http.delete(uri, headers: _headers);
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Exception deleting attachment: $e');
+      return false;
+    }
+  }
+
+  /// URL de visualisation / téléchargement direct
+  String getAttachmentUrl(String attachmentId) {
+    return '${AppConfig.apiBaseUrl}/v1/attachments/$attachmentId/raw';
+  }
+
   /// Envoyer un message et recevoir les tokens en streaming Server-Sent Events (SSE)
   /// Retourne un [ChatStreamHandle] permettant d'interrompre la génération à tout moment.
   ChatStreamHandle streamChatMessage({
     String? conversationId,
     required String content,
     String? editMessageId,
+    List<String>? attachmentIds,
     String model = AppConfig.defaultModel,
     required void Function(String convId, String? title) onInit,
     required void Function(String token) onToken,
@@ -173,6 +226,9 @@ class ChatApiService {
         };
         if (editMessageId != null) {
           body['edit_message_id'] = editMessageId;
+        }
+        if (attachmentIds != null && attachmentIds.isNotEmpty) {
+          body['attachment_ids'] = attachmentIds;
         }
 
         final request = http.Request('POST', uri)

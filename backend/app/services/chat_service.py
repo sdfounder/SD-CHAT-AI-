@@ -63,6 +63,7 @@ class ChatService:
                 )
 
         # 2. Sauvegarde ou mise à jour du message utilisateur
+        user_message_id = None
         if request.edit_message_id:
             edited = ChatRepository.edit_and_truncate_after(
                 conversation_id=conversation_id,
@@ -75,14 +76,25 @@ class ChatService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Message à modifier introuvable dans cette conversation",
                 )
+            user_message_id = edited["id"]
         else:
-            ChatRepository.save_message(
+            saved_msg = ChatRepository.save_message(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 role="user",
                 content=request.content,
                 tokens_used=len(request.content.split()),
                 model=request.model
+            )
+            user_message_id = saved_msg["id"]
+
+        # Rattachement des pièces jointes au message utilisateur
+        if request.attachment_ids and user_message_id:
+            ChatRepository.link_attachments_to_message(
+                attachment_ids=request.attachment_ids,
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                user_id=user_id
             )
 
         # Émettre le premier événement pour informer le client de l'ID conversation

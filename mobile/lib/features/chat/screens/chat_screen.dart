@@ -4,6 +4,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/services/chat_api_service.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/chat_message.dart';
+import '../../../shared/models/chat_attachment.dart';
 import '../widgets/chat_input_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/typing_indicator.dart';
@@ -115,8 +116,12 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _sendMessage(String text, {String? editMessageId}) async {
-    if (text.trim().isEmpty || _isStreaming) return;
+  Future<void> _sendMessage(
+    String text, {
+    List<ChatAttachment> attachments = const [],
+    String? editMessageId,
+  }) async {
+    if ((text.trim().isEmpty && attachments.isEmpty) || _isStreaming) return;
 
     setState(() {
       _lastErrorMessage = null;
@@ -131,13 +136,14 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
 
-    // 2. Ajouter le message de l'utilisateur
+    // 2. Ajouter le message de l'utilisateur avec ses pièces jointes
     final userMessage = ChatMessage(
       id: editMessageId ?? 'local-${DateTime.now().millisecondsSinceEpoch}',
       conversationId: _currentConversation?.id ?? '',
       userId: '',
       role: MessageRole.user,
       content: text,
+      attachments: attachments,
       createdAt: DateTime.now(),
     );
 
@@ -160,10 +166,16 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
 
     // 4. Déclencher le streaming SSE vers le backend FastAPI Cloud
+    final attachmentIds = attachments
+        .map((a) => a.id)
+        .where((id) => !id.startsWith('local-'))
+        .toList();
+
     _currentStreamHandle = _chatApi.streamChatMessage(
       conversationId: _currentConversation?.id,
       content: text,
       editMessageId: editMessageId,
+      attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
       model: AppConfig.defaultModel,
       onInit: (convId, title) {
         if (mounted) {
@@ -397,7 +409,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
           ),
           ChatInputBar(
-            onSend: (text) => _sendMessage(text),
+            conversationId: _currentConversation?.id,
+            onSend: (text, atts) => _sendMessage(text, attachments: atts),
             isStreaming: _isStreaming,
             onStop: _stopGeneration,
           ),

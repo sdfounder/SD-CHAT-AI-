@@ -200,7 +200,7 @@ class ChatRepository:
 
     @staticmethod
     def get_messages(conversation_id: str, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Récupère l'historique chronologique des messages d'une conversation."""
+        """Récupère l'historique chronologique des messages d'une conversation avec leurs pièces jointes."""
         # Vérification préalable de propriété
         conv = ChatRepository.get_conversation(conversation_id, user_id)
         if not conv:
@@ -218,17 +218,50 @@ class ChatRepository:
                 cid=conversation_id,
                 limit=limit
             )
+            if not rows:
+                return []
+
+            # Récupérer les pièces jointes associées à ces messages
+            att_rows = conn.run(
+                """
+                SELECT id, conversation_id, message_id, user_id, file_name, file_type, storage_path, mime_type, file_size_bytes, created_at
+                FROM public.chat_attachments
+                WHERE conversation_id = :cid AND message_id IS NOT NULL
+                ORDER BY created_at ASC
+                """,
+                cid=conversation_id
+            )
+            attachments_by_msg: Dict[str, List[Dict[str, Any]]] = {}
+            for ar in att_rows:
+                mid = str(ar[2])
+                att_item = {
+                    "id": str(ar[0]),
+                    "conversation_id": str(ar[1]) if ar[1] else None,
+                    "message_id": mid,
+                    "user_id": str(ar[3]),
+                    "file_name": ar[4],
+                    "file_type": ar[5],
+                    "storage_path": ar[6],
+                    "mime_type": ar[7],
+                    "file_size_bytes": int(ar[8]),
+                    "created_at": ar[9],
+                    "url": f"/api/v1/attachments/{str(ar[0])}"
+                }
+                attachments_by_msg.setdefault(mid, []).append(att_item)
+
             results = []
             for r in rows:
+                msg_id = str(r[0])
                 results.append({
-                    "id": str(r[0]),
+                    "id": msg_id,
                     "conversation_id": str(r[1]),
                     "user_id": str(r[2]),
                     "role": r[3],
                     "content": r[4],
                     "tokens_used": int(r[5] or 0),
                     "model": r[6],
-                    "created_at": r[7]
+                    "created_at": r[7],
+                    "attachments": attachments_by_msg.get(msg_id, [])
                 })
             return results
 
@@ -329,3 +362,159 @@ class ChatRepository:
                 "model": r[6],
                 "created_at": r[7]
             }
+
+    @staticmethod
+    def create_attachment(
+        attachment_id: str,
+        user_id: str,
+        file_name: str,
+        file_type: str,
+        storage_path: str,
+        mime_type: str,
+        file_size_bytes: int,
+        conversation_id: Optional[str] = None,
+        content_bytes: Optional[bytes] = None,
+    ) -> Dict[str, Any]:
+        """Enregistre les métadonnées et le contenu binaire d'une pièce jointe."""
+        ChatRepository.ensure_user_profile(user_id)
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                INSERT INTO public.chat_attachments 
+                (id, user_id, conversation_id, file_name, file_type, storage_path, mime_type, file_size_bytes, created_at)
+                VALUES (:aid, :uid, :cid, :fname, :ftype, :spath, :mime, :fsize, NOW())
+                RETURNING id, conversation_id, message_id, user_id, file_name, file_type, storage_path, mime_type, file_size_bytes, created_at
+                """,
+                aid=attachment_id,
+                uid=user_id,
+                cid=conversation_id,
+                fname=file_name,
+                ftype=file_type,
+                spath=storage_path,
+                mime=mime_type,
+                fsize=file_size_bytes,
+            )
+            r = rows[0]
+
+            if content_bytes is not None:
+                conn.run(
+                    """
+                    INSERT INTO public.chat_attachment_blobs (attachment_id, content_bytes, created_at)
+                    VALUES (:aid, :content, NOW())
+                    ON CONFLICT (attachment_id) DO UPDATE SET content_bytes = EXCLUDED.content_bytes
+                    """,
+                    aid=attachment_id,
+                    content=content_bytes,
+                )
+
+            return {
+                "id": str(r[0]),
+                "conversation_id": str(r[1]) if r[1] else None,
+                "message_id": str(r[2]) if r[2] else None,
+                "user_id": str(r[3]),
+                "file_name": r[4],
+                "file_type": r[5],
+                "storage_path": r[6],
+                "mime_type": r[7],
+                "file_size_bytes": int(r[8]),
+                "created_at": r[9],
+                "url": f"/api/v1/attachments/{str(r[0])}",
+            }
+
+    @staticmethod
+    def get_attachment(attachment_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Récupère les métadonnées d'une pièce jointe en vérifiant le propriétaire."""
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                SELECT id, conversation_id, message_id, user_id, file_name, file_type, storage_path, mime_type, file_size_bytes, created_at
+                FROM public.chat_attachments
+                WHERE id = :aid AND user_id = :uid
+                """,
+                aid=attachment_id,
+                uid=user_id,
+            )
+            if not rows:
+                return None
+            r = rows[0]
+            return {
+                "id": str(r[0]),
+                "conversation_id": str(r[1]) if r[1] else None,
+                "message_id": str(r[2]) if r[2] else None,
+                "user_id": str(r[3]),
+                "file_name": r[4],
+                "file_type": r[5],
+                "storage_path": r[6],
+                "mime_type": r[7],
+                "file_size_bytes": int(r[8]),
+                "created_at": r[9],
+                "url": f"/api/v1/attachments/{str(r[0])}",
+            }
+
+    @staticmethod
+    def get_attachment_blob(attachment_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Récupère le contenu binaire et le type MIME d'une pièce jointe avec vérification de sécurité."""
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                SELECT a.id, a.file_name, a.mime_type, a.file_size_bytes, b.content_bytes
+                FROM public.chat_attachments a
+                JOIN public.chat_attachment_blobs b ON b.attachment_id = a.id
+                WHERE a.id = :aid AND a.user_id = :uid
+                """,
+                aid=attachment_id,
+                uid=user_id,
+            )
+            if not rows:
+                return None
+            r = rows[0]
+            content = r[4]
+            if isinstance(content, memoryview):
+                content = content.tobytes()
+            return {
+                "id": str(r[0]),
+                "file_name": r[1],
+                "mime_type": r[2],
+                "file_size_bytes": int(r[3]),
+                "content_bytes": content,
+            }
+
+    @staticmethod
+    def link_attachments_to_message(
+        attachment_ids: List[str],
+        message_id: str,
+        conversation_id: str,
+        user_id: str,
+    ) -> None:
+        """Rattache une liste de pièces jointes à un message et une conversation."""
+        if not attachment_ids:
+            return
+        with db_manager.connect() as conn:
+            for aid in attachment_ids:
+                conn.run(
+                    """
+                    UPDATE public.chat_attachments
+                    SET message_id = :mid, conversation_id = :cid
+                    WHERE id = :aid AND user_id = :uid
+                    """,
+                    mid=message_id,
+                    cid=conversation_id,
+                    aid=aid,
+                    uid=user_id,
+                )
+
+    @staticmethod
+    def delete_attachment(attachment_id: str, user_id: str) -> bool:
+        """Supprime une pièce jointe et son contenu binaire (cascade)."""
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                DELETE FROM public.chat_attachments
+                WHERE id = :aid AND user_id = :uid
+                RETURNING id
+                """,
+                aid=attachment_id,
+                uid=user_id,
+            )
+            return len(rows) > 0
+

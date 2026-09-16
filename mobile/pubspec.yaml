@@ -39,6 +39,8 @@ dependencies:
   flutter_markdown: ^0.7.7+1
   markdown: ^7.3.0
   speech_to_text: ^7.5.0
+  image_picker: ^1.2.3
+  file_picker: ^13.1.0
 
 dev_dependencies:
   flutter_test:

@@ -48,7 +48,7 @@ class DatabaseConnectionManager:
             port=self._port,
             database=self._database,
             ssl_context=ctx,
-            timeout=20,
+            timeout=30,
         )
 
     def get_connection(self) -> pg8000.native.Connection:
@@ -57,8 +57,17 @@ class DatabaseConnectionManager:
 
     @contextmanager
     def connect(self):
-        """Context manager qui réutilise la connexion active pour un temps de réponse instantané (<300ms au lieu de ~9s)."""
+        """Context manager qui réutilise la connexion active avec rafraîchissement préventif et robustesse."""
         with self._lock:
+            now = time.time()
+            # Si la connexion a plus de 40 secondes d'inactivité, rafraîchir pour éviter les timeouts côté serveur Supabase
+            if self._conn is not None and (now - self._last_used > 40):
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+
             if self._conn is not None:
                 try:
                     self._conn.run("SELECT 1")

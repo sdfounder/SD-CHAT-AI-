@@ -1,17 +1,25 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+
 import '../../../core/theme/sd_chat_colors.dart';
 import '../../../core/services/voice_service.dart';
+import '../../../core/services/chat_api_service.dart';
+import '../../../shared/models/chat_attachment.dart';
 
 class ChatInputBar extends StatefulWidget {
-  final ValueChanged<String> onSend;
+  final void Function(String text, List<ChatAttachment> attachments) onSend;
   final bool isStreaming;
   final VoidCallback? onStop;
+  final String? conversationId;
 
   const ChatInputBar({
     super.key,
     required this.onSend,
     this.isStreaming = false,
     this.onStop,
+    this.conversationId,
   });
 
   @override
@@ -21,12 +29,19 @@ class ChatInputBar extends StatefulWidget {
 class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
   final VoiceService _voice = VoiceService();
+  final ChatApiService _chatApi = ChatApiService();
+  final ImagePicker _imagePicker = ImagePicker();
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
   bool _hasText = false;
   String _textBeforeDictation = '';
+
+  // Liste des pièces jointes en attente d'envoi
+  final List<ChatAttachment> _pendingAttachments = [];
+
+  static const int _maxFileSizeBytes = 10 * 1024 * 1024; // 10 Mo
 
   @override
   void initState() {
@@ -126,7 +141,6 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
             } else {
               _controller.text = words;
             }
-            // Déplacer le curseur à la fin du texte pour permettre la saisie et modification immédiate
             _controller.selection = TextSelection.fromPosition(
               TextPosition(offset: _controller.text.length),
             );
@@ -136,24 +150,293 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
   }
 
+  /// Ouvre le menu modal pour choisir Image ou Fichier texte
+  void _showAttachmentOptions() {
+    if (widget.isStreaming) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: SDChatColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: SDChatColors.borderMedium,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Ajouter une pièce jointe',
+                    style: TextStyle(
+                      color: SDChatColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: SDChatColors.surfaceHighlight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.image_rounded, color: SDChatColors.primary),
+                  ),
+                  title: const Text(
+                    'Image depuis la Galerie',
+                    style: TextStyle(color: SDChatColors.textPrimary, fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    'JPEG, PNG, WebP (max 10 Mo)',
+                    style: TextStyle(color: SDChatColors.textMuted, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImage(ImageSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: SDChatColors.surfaceHighlight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.description_rounded, color: SDChatColors.primary),
+                  ),
+                  title: const Text(
+                    'Fichier texte (.txt, .md, .csv)',
+                    style: TextStyle(color: SDChatColors.textPrimary, fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    'Documents et données textuelles (max 10 Mo)',
+                    style: TextStyle(color: SDChatColors.textMuted, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickTextFile();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Sélection d'image via image_picker
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? picked = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 88,
+      );
+      if (picked == null) return;
+
+      final file = File(picked.path);
+      final size = await file.length();
+
+      if (size > _maxFileSizeBytes) {
+        _showFeedbackSnackbar(
+          'L\'image dépasse la taille maximale autorisée de 10 Mo.',
+          isError: true,
+        );
+        return;
+      }
+
+      final fileName = picked.name.isNotEmpty ? picked.name : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      _uploadAndAddAttachment(
+        filePath: picked.path,
+        fileName: fileName,
+        fileType: 'image',
+        mimeType: picked.mimeType ?? 'image/jpeg',
+        fileSizeBytes: size,
+      );
+    } catch (e) {
+      _showFeedbackSnackbar('Erreur lors de la sélection de l\'image: $e', isError: true);
+    }
+  }
+
+  /// Sélection de fichier texte via file_picker
+  Future<void> _pickTextFile() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'md', 'csv', 'log'],
+      );
+
+      if (result.isEmpty) return;
+      final pickedFile = result.first;
+      final path = pickedFile.path;
+      if (path == null) return;
+
+      final size = pickedFile.lengthSync() ?? (await File(path).length());
+      if (size > _maxFileSizeBytes) {
+        _showFeedbackSnackbar(
+          'Le fichier texte dépasse la taille maximale autorisée de 10 Mo.',
+          isError: true,
+        );
+        return;
+      }
+
+      final fileName = pickedFile.name;
+      _uploadAndAddAttachment(
+        filePath: path,
+        fileName: fileName,
+        fileType: 'text',
+        mimeType: 'text/plain',
+        fileSizeBytes: size,
+      );
+    } catch (e) {
+      _showFeedbackSnackbar('Erreur lors de la sélection du fichier: $e', isError: true);
+    }
+  }
+
+  /// Téléversement réel vers le backend Cloud et suivi d'état
+  Future<void> _uploadAndAddAttachment({
+    required String filePath,
+    required String fileName,
+    required String fileType,
+    required String mimeType,
+    required int fileSizeBytes,
+  }) async {
+    // Création d'un élément local temporaire
+    final tempAttachment = ChatAttachment(
+      id: 'local-${DateTime.now().millisecondsSinceEpoch}',
+      userId: '',
+      fileName: fileName,
+      fileType: fileType,
+      storagePath: '',
+      mimeType: mimeType,
+      fileSizeBytes: fileSizeBytes,
+      createdAt: DateTime.now(),
+      localPath: filePath,
+      isUploading: true,
+      hasError: false,
+    );
+
+    setState(() {
+      _pendingAttachments.add(tempAttachment);
+    });
+
+    try {
+      final uploaded = await _chatApi.uploadAttachment(
+        filePath: filePath,
+        fileName: fileName,
+        conversationId: widget.conversationId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        final index = _pendingAttachments.indexOf(tempAttachment);
+        if (index != -1) {
+          if (uploaded != null) {
+            _pendingAttachments[index] = ChatAttachment(
+              id: uploaded.id,
+              conversationId: uploaded.conversationId,
+              messageId: uploaded.messageId,
+              userId: uploaded.userId,
+              fileName: uploaded.fileName,
+              fileType: uploaded.fileType,
+              storagePath: uploaded.storagePath,
+              mimeType: uploaded.mimeType,
+              fileSizeBytes: uploaded.fileSizeBytes,
+              createdAt: uploaded.createdAt,
+              url: uploaded.url,
+              localPath: filePath,
+              isUploading: false,
+              hasError: false,
+            );
+          } else {
+            _pendingAttachments[index].isUploading = false;
+            _pendingAttachments[index].hasError = true;
+            _pendingAttachments[index].errorMessage = 'Échec du téléversement';
+          }
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        final index = _pendingAttachments.indexOf(tempAttachment);
+        if (index != -1) {
+          _pendingAttachments[index].isUploading = false;
+          _pendingAttachments[index].hasError = true;
+          _pendingAttachments[index].errorMessage = '$e';
+        }
+      });
+    }
+  }
+
+  /// Suppression d'une pièce jointe avant l'envoi
+  Future<void> _removeAttachment(ChatAttachment att) async {
+    setState(() {
+      _pendingAttachments.remove(att);
+    });
+
+    // Si déjà uploadée sur le serveur, la supprimer
+    if (!att.id.startsWith('local-')) {
+      await _chatApi.deleteAttachment(att.id);
+    }
+  }
+
   void _handleSend() {
-    // Si la dictée est en cours, l'arrêter avant d'envoyer
     if (_voice.isListening) {
       _voice.stopListening();
     }
 
+    // Vérifier si des uploads sont encore en cours
+    final isStillUploading = _pendingAttachments.any((a) => a.isUploading);
+    if (isStillUploading) {
+      _showFeedbackSnackbar('Veuillez patienter pendant le téléversement des pièces jointes...');
+      return;
+    }
+
+    final validAttachments = _pendingAttachments.where((a) => !a.hasError).toList();
     final text = _controller.text.trim();
-    if (text.isNotEmpty && !widget.isStreaming) {
-      widget.onSend(text);
+
+    if ((text.isNotEmpty || validAttachments.isNotEmpty) && !widget.isStreaming) {
+      final promptToSend = text.isNotEmpty
+          ? text
+          : (validAttachments.length == 1
+              ? 'Analyse ce document : ${validAttachments.first.fileName}'
+              : 'Analyse ces pièces jointes jointes au message');
+
+      widget.onSend(promptToSend, validAttachments);
+
       _controller.clear();
       _textBeforeDictation = '';
-      setState(() => _hasText = false);
+      setState(() {
+        _hasText = false;
+        _pendingAttachments.clear();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isListening = _voice.isListening;
+    final bool hasPendingAttachments = _pendingAttachments.isNotEmpty;
+    final bool canSend = (_hasText || hasPendingAttachments) &&
+        !_pendingAttachments.any((a) => a.isUploading);
 
     return Container(
       decoration: const BoxDecoration(
@@ -223,12 +506,28 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               ),
             ),
 
+          // Prévisualisation des pièces jointes en attente d'envoi
+          if (hasPendingAttachments)
+            Container(
+              height: 72,
+              margin: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _pendingAttachments.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final att = _pendingAttachments[index];
+                  return _buildAttachmentPreviewChip(att);
+                },
+              ),
+            ),
+
           // Barre d'entrée principale
           Padding(
             padding: EdgeInsets.only(
               left: 14,
               right: 14,
-              top: isListening ? 6 : 10,
+              top: isListening ? 6 : 8,
               bottom: MediaQuery.of(context).padding.bottom + 10,
             ),
             child: Container(
@@ -239,7 +538,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                 border: Border.all(
                   color: isListening
                       ? SDChatColors.primary
-                      : _hasText
+                      : canSend
                           ? SDChatColors.primary.withValues(alpha: 0.5)
                           : SDChatColors.borderMedium,
                   width: isListening ? 1.2 : 0.8,
@@ -248,19 +547,12 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Bouton pièce jointe
+                  // Bouton pièce jointe 📎
                   IconButton(
                     icon: const Icon(Icons.attach_file_rounded, size: 20),
-                    color: SDChatColors.textMuted,
-                    tooltip: 'Joindre un fichier (Images / TXT)',
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Upload de fichiers disponible sous peu.'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    },
+                    color: hasPendingAttachments ? SDChatColors.primary : SDChatColors.textSecondary,
+                    tooltip: 'Joindre une image ou un fichier texte',
+                    onPressed: _showAttachmentOptions,
                   ),
 
                   // Champ de saisie extensible
@@ -279,7 +571,9 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                         decoration: InputDecoration(
                           hintText: isListening
                               ? 'Dictée en cours...'
-                              : 'Posez votre question à SD CHAT AI...',
+                              : hasPendingAttachments
+                                  ? 'Ajoutez un commentaire (optionnel)...'
+                                  : 'Posez votre question à SD CHAT AI...',
                           hintStyle: TextStyle(
                             color: isListening ? SDChatColors.primary : SDChatColors.textMuted,
                             fontSize: 14.5,
@@ -353,7 +647,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                               width: 32,
                               height: 32,
                               decoration: BoxDecoration(
-                                color: _hasText
+                                color: canSend
                                     ? SDChatColors.primary
                                     : SDChatColors.surfaceHighlight,
                                 shape: BoxShape.circle,
@@ -362,16 +656,144 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                                 child: Icon(
                                   Icons.arrow_upward_rounded,
                                   size: 18,
-                                  color: _hasText
+                                  color: canSend
                                       ? SDChatColors.background
                                       : SDChatColors.textDisabled,
                                 ),
                               ),
                             ),
-                            onPressed: _hasText ? _handleSend : null,
+                            onPressed: canSend ? _handleSend : null,
                           ),
                   ),
                 ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Miniature pour chaque pièce jointe en attente avec jauge d'upload et bouton ✕
+  Widget _buildAttachmentPreviewChip(ChatAttachment att) {
+    return Container(
+      width: 140,
+      decoration: BoxDecoration(
+        color: SDChatColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: att.hasError
+              ? SDChatColors.error.withValues(alpha: 0.7)
+              : SDChatColors.borderMedium,
+          width: 0.8,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                // Vignette ou icône
+                if (att.isImage && att.localPath != null && File(att.localPath!).existsSync())
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.file(
+                      File(att.localPath!),
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                else
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: SDChatColors.surfaceHighlight,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      att.isImage ? Icons.image_rounded : Icons.description_rounded,
+                      color: SDChatColors.primary,
+                      size: 22,
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        att.fileName,
+                        style: const TextStyle(
+                          color: SDChatColors.textPrimary,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        att.hasError
+                            ? 'Erreur'
+                            : att.isUploading
+                                ? 'Envoi...'
+                                : att.formattedSize,
+                        style: TextStyle(
+                          color: att.hasError ? SDChatColors.error : SDChatColors.textMuted,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Indicateur de chargement en overlay
+          if (att.isUploading)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: SDChatColors.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // Bouton supprimer ✕
+          Positioned(
+            top: 2,
+            right: 2,
+            child: InkWell(
+              onTap: () => _removeAttachment(att),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: SDChatColors.surfaceHighlight,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: SDChatColors.borderMedium, width: 0.5),
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  size: 14,
+                  color: SDChatColors.textSecondary,
+                ),
               ),
             ),
           ),

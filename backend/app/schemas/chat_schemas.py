@@ -29,6 +29,20 @@ class ConversationResponse(BaseModel):
     last_message_preview: Optional[str] = None
 
 
+class AttachmentResponse(BaseModel):
+    id: str
+    conversation_id: Optional[str] = None
+    message_id: Optional[str] = None
+    user_id: str
+    file_name: str
+    file_type: str  # 'image' ou 'text'
+    storage_path: str
+    mime_type: str
+    file_size_bytes: int
+    created_at: datetime
+    url: Optional[str] = None
+
+
 class MessageResponse(BaseModel):
     id: str
     conversation_id: str
@@ -38,6 +52,7 @@ class MessageResponse(BaseModel):
     tokens_used: int = 0
     model: Optional[str] = None
     created_at: datetime
+    attachments: List[AttachmentResponse] = []
 
 
 class ConversationDetailResponse(BaseModel):
@@ -57,6 +72,10 @@ class SendMessageRequest(BaseModel):
     edit_message_id: Optional[str] = Field(
         default=None,
         description="ID du message utilisateur à modifier pour régénérer la réponse à partir de ce point."
+    )
+    attachment_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Liste d'IDs de pièces jointes à rattacher au message utilisateur."
     )
 
 

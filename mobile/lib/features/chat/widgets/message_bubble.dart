@@ -5,6 +5,8 @@ import 'package:markdown/markdown.dart' as md;
 import '../../../core/theme/sd_chat_colors.dart';
 import '../../../shared/models/chat_message.dart';
 
+import 'attachment_view.dart';
+
 class MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final void Function(ChatMessage message)? onEdit;
@@ -25,6 +27,9 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _buildUserBubble(BuildContext context) {
+    final hasContent = message.content.trim().isNotEmpty;
+    final hasAttachments = message.attachments.isNotEmpty;
+
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
@@ -32,30 +37,38 @@ class MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: SDChatColors.userBubble,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(18),
-                  topRight: Radius.circular(18),
-                  bottomLeft: Radius.circular(18),
-                  bottomRight: Radius.circular(4),
+            // Affichage des pièces jointes associées au message
+            if (hasAttachments)
+              MessageAttachmentsView(
+                attachments: message.attachments,
+                isUser: true,
+              ),
+
+            if (hasContent)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: SDChatColors.userBubble,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(18),
+                    topRight: Radius.circular(18),
+                    bottomLeft: Radius.circular(18),
+                    bottomRight: Radius.circular(4),
+                  ),
+                  border: Border.all(
+                    color: SDChatColors.userBubbleBorder,
+                    width: 0.8,
+                  ),
                 ),
-                border: Border.all(
-                  color: SDChatColors.userBubbleBorder,
-                  width: 0.8,
+                child: SelectableText(
+                  message.content,
+                  style: const TextStyle(
+                    color: SDChatColors.textPrimary,
+                    fontSize: 15,
+                    height: 1.45,
+                  ),
                 ),
               ),
-              child: SelectableText(
-                message.content,
-                style: const TextStyle(
-                  color: SDChatColors.textPrimary,
-                  fontSize: 15,
-                  height: 1.45,
-                ),
-              ),
-            ),
             const SizedBox(height: 4),
             // Barre d'actions sous le message utilisateur
             Row(

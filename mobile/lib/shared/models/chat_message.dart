@@ -1,3 +1,5 @@
+import 'chat_attachment.dart';
+
 enum MessageRole { user, assistant, system }
 
 class ChatMessage {
@@ -9,6 +11,7 @@ class ChatMessage {
   final int tokensUsed;
   final String? model;
   final DateTime createdAt;
+  final List<ChatAttachment> attachments;
   bool isStreaming;
 
   ChatMessage({
@@ -20,6 +23,7 @@ class ChatMessage {
     this.tokensUsed = 0,
     this.model,
     required this.createdAt,
+    this.attachments = const [],
     this.isStreaming = false,
   });
 
@@ -35,6 +39,11 @@ class ChatMessage {
       parsedRole = MessageRole.system;
     }
 
+    final rawAtts = json['attachments'] as List<dynamic>? ?? [];
+    final parsedAtts = rawAtts
+        .map((a) => ChatAttachment.fromJson(a as Map<String, dynamic>))
+        .toList();
+
     return ChatMessage(
       id: json['id'] as String,
       conversationId: json['conversation_id'] as String,
@@ -46,6 +55,7 @@ class ChatMessage {
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
+      attachments: parsedAtts,
       isStreaming: false,
     );
   }

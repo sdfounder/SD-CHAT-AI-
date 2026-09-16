@@ -20,7 +20,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (msg) {
+              onSend: (msg, atts) {
                 sentMessage = msg;
               },
             ),
@@ -65,7 +65,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (msg) {
+              onSend: (msg, atts) {
                 sentMessage = msg;
               },
             ),
