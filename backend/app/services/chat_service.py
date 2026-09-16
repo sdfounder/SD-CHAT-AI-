@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from app.core.security import AuthenticatedUser
 from app.schemas.chat_schemas import SendMessageRequest
 from app.repositories.chat_repository import ChatRepository
+from app.services.context_service import ContextService
 from app.ai import get_ai_provider
 
 logger = logging.getLogger(__name__)
@@ -106,17 +107,15 @@ class ChatService:
         }
         yield f"data: {json.dumps(init_event, ensure_ascii=False)}\n\n"
 
-        # 3. Récupération de l'historique (derniers 20 messages pour le contexte)
-        past_messages = ChatRepository.get_messages(conversation_id, user_id, limit=20)
-        formatted_history: List[Dict[str, str]] = []
-        for m in past_messages:
-            formatted_history.append({
-                "role": m["role"],
-                "content": m["content"]
-            })
-
-        # 4. Instanciation du Provider IA
+        # 3. Instanciation du Provider IA
         ai_provider = get_ai_provider("gemini", model=request.model)
+
+        # 4. Construction intelligente et sécurisée du contexte conversationnel (fenêtre glissante + résumé)
+        formatted_history: List[Dict[str, str]] = await ContextService.prepare_context_messages(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            ai_provider=ai_provider,
+        )
 
         system_instruction = request.system_prompt or conv.get("system_prompt") or (
             "Tu es SD CHAT AI, un assistant d'intelligence artificielle hautement performant, "

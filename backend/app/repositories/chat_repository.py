@@ -115,7 +115,8 @@ class ChatRepository:
         with db_manager.connect() as conn:
             rows = conn.run(
                 """
-                SELECT id, user_id, title, model, system_prompt, is_archived, is_pinned, created_at, updated_at
+                SELECT id, user_id, title, model, system_prompt, is_archived, is_pinned, created_at, updated_at,
+                       context_summary, summary_until_message_id
                 FROM public.chat_conversations
                 WHERE id = :cid AND user_id = :uid
                 """,
@@ -134,7 +135,9 @@ class ChatRepository:
                 "is_archived": r[5],
                 "is_pinned": r[6],
                 "created_at": r[7],
-                "updated_at": r[8]
+                "updated_at": r[8],
+                "context_summary": r[9],
+                "summary_until_message_id": str(r[10]) if r[10] else None,
             }
 
     @staticmethod
@@ -517,4 +520,46 @@ class ChatRepository:
                 uid=user_id,
             )
             return len(rows) > 0
+
+    @staticmethod
+    def update_context_summary(
+        conversation_id: str,
+        user_id: str,
+        context_summary: str,
+        summary_until_message_id: Optional[str] = None,
+    ) -> bool:
+        """Met à jour le résumé condensé de la mémoire de conversation dans Supabase."""
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                UPDATE public.chat_conversations
+                SET context_summary = :summary, 
+                    summary_until_message_id = :mid,
+                    updated_at = NOW()
+                WHERE id = :cid AND user_id = :uid
+                RETURNING id
+                """,
+                summary=context_summary,
+                mid=summary_until_message_id,
+                cid=conversation_id,
+                uid=user_id,
+            )
+            return len(rows) > 0
+
+    @staticmethod
+    def count_conversation_messages(conversation_id: str, user_id: str) -> int:
+        """Compte le nombre de messages dans une conversation vérifiant la propriété."""
+        with db_manager.connect() as conn:
+            rows = conn.run(
+                """
+                SELECT COUNT(m.id)
+                FROM public.chat_messages m
+                JOIN public.chat_conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = :cid AND c.user_id = :uid
+                """,
+                cid=conversation_id,
+                uid=user_id,
+            )
+            return int(rows[0][0]) if rows else 0
+
 
