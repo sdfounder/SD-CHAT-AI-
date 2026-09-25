@@ -6,21 +6,31 @@ from fastapi import HTTPException, status
 from app.database.connection import db_manager
 from app.schemas.chat_schemas import QuotaStatusResponse
 from app.repositories.chat_repository import ChatRepository
+from app.ai.gateway.plan_engine import PlanEngine
 
 logger = logging.getLogger(__name__)
 
-# Quotas officiels des plans SD CHAT AI
-FREE_DAILY_MESSAGES_LIMIT = 20
+# Constantes historiques pour rétro-compatibilité
+FREE_DAILY_MESSAGES_LIMIT = 5
 FREE_DAILY_ATTACHMENTS_LIMIT = 3
-
-PREMIUM_DAILY_MESSAGES_LIMIT = 500
+PREMIUM_DAILY_MESSAGES_LIMIT = 10
 PREMIUM_DAILY_ATTACHMENTS_LIMIT = 50
+VIP_DAILY_MESSAGES_LIMIT = 25
+VIP_DAILY_ATTACHMENTS_LIMIT = 100
+BLACK_DAILY_MESSAGES_LIMIT = 200
+BLACK_DAILY_ATTACHMENTS_LIMIT = 500
+
+
 
 
 class QuotaService:
     """
     Gestionnaire centralisé et sécurisé des droits (Entitlements) et des Quotas
-    pour SD CHAT AI (Free vs Premium).
+    pour les 4 plans officiels SD CHAT AI :
+    - SD FREE (5 req/j)
+    - SD PREMIUM (10 req/j)
+    - SD VIP (25 req/j)
+    - SD BLACK PREMIUM ULTRA (Haute capacité Fair Use)
     Toute vérification s'exécute côté serveur (FastAPI + Supabase PostgreSQL).
     """
 
@@ -35,35 +45,32 @@ class QuotaService:
     def get_user_entitlement(user_id: str) -> Dict[str, Any]:
         """
         Vérifie les droits réels (Entitlements) de l'utilisateur dans Supabase.
-        Un utilisateur est Premium uniquement si :
-        1. Une souscription active existe dans public.subscriptions (status='active' et current_period_end > NOW())
-        2. OU son profil dans public.profiles a tier = 'premium'
-        3. OU (mode test serveur isolé) user_id commence par 'test-premium-'
+        Supporte les 4 plans SD et les abonnements Stripe ou Mobile Money.
         """
-        # Mode de test isolé pour la suite de tests backend automatisée
+        # Mode de test isolé pour la suite de tests automatisée
+        if user_id.startswith("test-black-"):
+            return {"plan": "black", "is_premium": True, "status": "active", "source": "test_isolated"}
+        if user_id.startswith("test-vip-"):
+            return {"plan": "vip", "is_premium": True, "status": "active", "source": "test_isolated"}
         if user_id.startswith("test-premium-"):
-            return {
-                "plan": "premium",
-                "is_premium": True,
-                "status": "active",
-                "source": "test_isolated_entitlement",
-            }
+            return {"plan": "premium", "is_premium": True, "status": "active", "source": "test_isolated"}
+        if user_id.startswith("test-free-"):
+            return {"plan": "free", "is_premium": False, "status": "free", "source": "test_isolated"}
 
         with db_manager.connect() as conn:
-            # 1. Vérification dans public.subscriptions
+            # 1. Vérification dans public.subscriptions (Priorité aux abonnements actifs)
             sub_rows = conn.run(
                 """
                 SELECT plan_id, status, current_period_end
                 FROM public.subscriptions
                 WHERE user_id = :uid AND status = 'active'
-                ORDER BY current_period_end DESC
+                ORDER BY current_period_end DESC NULLS LAST
                 LIMIT 1
                 """,
                 uid=user_id
             )
             if sub_rows:
                 plan_id, sub_status, period_end = sub_rows[0]
-                # Vérifier si l'abonnement n'a pas expiré
                 is_valid = True
                 if period_end:
                     now = datetime.now(timezone.utc)
@@ -71,12 +78,14 @@ class QuotaService:
                         period_end = period_end.replace(tzinfo=timezone.utc)
                     is_valid = period_end > now
 
-                if is_valid and plan_id in ("premium", "pro"):
+                if is_valid:
+                    norm_plan = PlanEngine.normalize_plan(plan_id)
                     return {
-                        "plan": "premium",
-                        "is_premium": True,
+                        "plan": norm_plan,
+                        "is_premium": norm_plan != "free",
                         "status": sub_status,
-                        "source": "stripe_subscription",
+                        "source": "active_subscription",
+                        "period_end": period_end,
                     }
 
             # 2. Vérification dans public.profiles (tier)
@@ -86,15 +95,17 @@ class QuotaService:
                 """,
                 uid=user_id
             )
-            if prof_rows and prof_rows[0][0] == "premium":
-                return {
-                    "plan": "premium",
-                    "is_premium": True,
-                    "status": "active",
-                    "source": "profile_tier",
-                }
+            if prof_rows and prof_rows[0][0]:
+                norm_tier = PlanEngine.normalize_plan(prof_rows[0][0])
+                if norm_tier != "free":
+                    return {
+                        "plan": norm_tier,
+                        "is_premium": True,
+                        "status": "active",
+                        "source": "profile_tier",
+                    }
 
-        # Plan par défaut
+        # Plan par défaut : FREE
         return {
             "plan": "free",
             "is_premium": False,
@@ -110,13 +121,13 @@ class QuotaService:
         """
         ChatRepository.ensure_user_profile(user_id)
         entitlement = QuotaService.get_user_entitlement(user_id)
-        is_premium = entitlement["is_premium"]
+        user_plan = entitlement["plan"]
+        limits = PlanEngine.get_plan_limits(user_plan)
 
-        messages_limit = PREMIUM_DAILY_MESSAGES_LIMIT if is_premium else FREE_DAILY_MESSAGES_LIMIT
-        attachments_limit = PREMIUM_DAILY_ATTACHMENTS_LIMIT if is_premium else FREE_DAILY_ATTACHMENTS_LIMIT
+        messages_limit = limits["daily_messages_limit"]
+        attachments_limit = limits["daily_attachments_limit"]
 
         with db_manager.connect() as conn:
-            # Récupérer ou créer la ligne de consommation du jour (CURRENT_DATE)
             rows = conn.run(
                 """
                 INSERT INTO public.chat_user_usage (user_id, period_start, messages_sent, tokens_used, attachments_count, created_at, updated_at)
@@ -133,10 +144,12 @@ class QuotaService:
         attachments_remaining = max(0, attachments_limit - attachments_count)
         is_quota_exceeded = messages_sent >= messages_limit
 
+        allowed_models = [m["model_id"] for m in PlanEngine.get_allowed_models_list(user_plan)]
+
         return QuotaStatusResponse(
             user_id=user_id,
-            plan=entitlement["plan"],
-            is_premium=is_premium,
+            plan=user_plan,
+            is_premium=entitlement["is_premium"],
             messages_limit=messages_limit,
             messages_used=messages_sent,
             messages_remaining=messages_remaining,
@@ -145,6 +158,9 @@ class QuotaService:
             attachments_remaining=attachments_remaining,
             is_quota_exceeded=is_quota_exceeded,
             reset_at=QuotaService._calculate_next_reset_time(),
+            plan_name=limits["name"],
+            can_select_model=limits["can_select_model"],
+            allowed_models=allowed_models,
         )
 
     @staticmethod
@@ -163,10 +179,11 @@ class QuotaService:
                 detail={
                     "error_code": "QUOTA_EXCEEDED",
                     "message": (
-                        f"Vous avez atteint votre quota journalier de {status_info.messages_limit} messages. "
-                        "Vos messages seront réinitialisés à minuit UTC, ou passez à SD CHAT AI Premium pour 500 messages/jour."
+                        f"Vous avez atteint votre quota journalier de {status_info.messages_limit} messages pour le plan {status_info.plan_name}. "
+                        "Vos messages seront réinitialisés à minuit UTC, ou passez à un plan supérieur SD (Premium, VIP ou Black Ultra)."
                     ),
                     "plan": status_info.plan,
+                    "plan_name": status_info.plan_name,
                     "messages_limit": status_info.messages_limit,
                     "messages_used": status_info.messages_used,
                     "reset_at": status_info.reset_at.isoformat(),
@@ -184,7 +201,6 @@ class QuotaService:
                 uid=user_id
             )
 
-        # Mettre à jour les champs retournés
         status_info.messages_used += 1
         status_info.messages_remaining = max(0, status_info.messages_limit - status_info.messages_used)
         status_info.is_quota_exceeded = status_info.messages_used >= status_info.messages_limit
@@ -205,7 +221,7 @@ class QuotaService:
                     "error_code": "ATTACHMENTS_QUOTA_EXCEEDED",
                     "message": (
                         f"Vous avez atteint la limite journalière de {status_info.attachments_limit} pièces jointes. "
-                        "Passez à SD CHAT AI Premium pour joindre jusqu'à 50 fichiers par jour."
+                        "Passez à un plan supérieur SD pour augmenter votre capacité de fichiers."
                     ),
                     "plan": status_info.plan,
                     "attachments_limit": status_info.attachments_limit,

@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 import 'core/theme/sd_chat_theme.dart';
 import 'core/theme/sd_chat_colors.dart';
 import 'core/services/auth_service.dart';
+import 'core/services/onboarding_service.dart';
+import 'core/services/settings_service.dart';
 import 'features/chat/screens/chat_screen.dart';
 import 'features/auth/screens/login_screen.dart';
+import 'features/onboarding/screens/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +25,12 @@ void main() async {
   final authService = AuthService();
   await authService.initialize();
 
+  final onboardingService = OnboardingService.instance;
+  await onboardingService.initialize();
+
+  final settingsService = SettingsService.instance;
+  await settingsService.initialize();
+
   runApp(const SDChatApp());
 }
 
@@ -31,14 +40,45 @@ class SDChatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = AuthService();
+    final onboarding = OnboardingService.instance;
+    final settings = SettingsService.instance;
 
-    return MaterialApp(
-      title: 'SD CHAT AI',
-      debugShowCheckedModeBanner: false,
-      theme: SDChatTheme.darkTheme,
-      home: AnimatedBuilder(
-        animation: auth,
-        builder: (context, _) {
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'SD CHAT AI',
+          debugShowCheckedModeBanner: false,
+          theme: SDChatTheme.buildTheme(
+            brightness: Brightness.light,
+            accentColor: settings.accentColor,
+          ),
+          darkTheme: SDChatTheme.buildTheme(
+            brightness: Brightness.dark,
+            accentColor: settings.accentColor,
+          ),
+          themeMode: settings.themeMode,
+          home: AnimatedBuilder(
+            animation: Listenable.merge([auth, onboarding]),
+            builder: (context, _) {
+          if (!auth.isInitialized || !onboarding.isInitialized) {
+            return const Scaffold(
+              backgroundColor: SDChatColors.background,
+              body: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: SDChatColors.primary,
+                ),
+              ),
+            );
+          }
+
+          // 1. Premier lancement sur cet appareil : Onboarding Premium
+          if (!onboarding.isOnboardingCompleted) {
+            return const OnboardingScreen();
+          }
+
+          // 2. Déjà complété : Authentifié -> ChatScreen, Sinon -> LoginScreen
           if (auth.isAuthenticated) {
             return const ChatScreen();
           } else {
@@ -47,5 +87,7 @@ class SDChatApp extends StatelessWidget {
         },
       ),
     );
+  },
+);
   }
 }

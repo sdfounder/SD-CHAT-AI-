@@ -6,8 +6,8 @@ from app.ai.base_provider import BaseLLMProvider
 logger = logging.getLogger(__name__)
 
 # Paramètres de dimensionnement du contexte
-MAX_RECENT_MESSAGES_WINDOW = 10  # 5 échanges complets (user + assistant) gardés verbatim
-MAX_CONTEXT_TOKEN_BUDGET = 3500  # Budget token maximal pour l'historique
+MAX_RECENT_MESSAGES_WINDOW = 6  # 3 échanges complets (user + assistant) gardés verbatim
+MAX_CONTEXT_TOKEN_BUDGET = 2500  # Budget token maximal pour l'historique
 SUMMARY_TRIGGER_THRESHOLD = 12   # Seuil de déclenchement du résumé incrémental
 
 # Flag pour future mission Mémoire Utilisateur (désactivé par défaut)
@@ -113,6 +113,7 @@ class ContextService:
         user_id: str,
         ai_provider: BaseLLMProvider,
         max_messages_limit: int = 50,
+        conv: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """
         Construit l'historique conversationnel optimisé et sécurisé :
@@ -121,8 +122,9 @@ class ContextService:
         3. Si > MAX_RECENT_MESSAGES_WINDOW : compresse l'historique ancien en résumé et
            conserve les messages récents intégraux.
         """
-        # 1. Vérifier la conversation et ses métadonnées
-        conv = ChatRepository.get_conversation(conversation_id, user_id)
+        # 1. Vérifier la conversation et ses métadonnées (réutilisation si déjà chargée)
+        if conv is None:
+            conv = ChatRepository.get_conversation(conversation_id, user_id)
         if not conv:
             return []
 
@@ -154,21 +156,21 @@ class ContextService:
         current_summary = existing_summary
         if needs_new_summary and last_older_id:
             try:
-                new_summary = await ContextService._generate_summary_for_messages(
+                new_sum = await ContextService._generate_summary_for_messages(
                     messages=older_messages,
                     existing_summary=existing_summary,
                     ai_provider=ai_provider,
                 )
-                if new_summary:
-                    current_summary = new_summary
+                if new_sum:
+                    current_summary = new_sum
                     ChatRepository.update_context_summary(
                         conversation_id=conversation_id,
                         user_id=user_id,
-                        context_summary=current_summary,
+                        context_summary=new_sum,
                         summary_until_message_id=last_older_id,
                     )
-            except Exception as e:
-                logger.error("Impossible de mettre à jour le context summary: %s", str(e))
+            except Exception as ex:
+                logger.debug("Mise à jour résumé de contexte: %s", ex)
 
         # 5. Assemblage du contexte final
         final_context: List[Dict[str, str]] = []

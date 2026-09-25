@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/sd_chat_colors.dart';
 import '../../../shared/models/user_quota.dart';
+import '../../premium/screens/premium_screen.dart';
 
 class QuotaDialog extends StatelessWidget {
   final UserQuota quota;
@@ -185,42 +187,57 @@ class QuotaDialog extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.of(context).pop();
+                    },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: SDChatColors.textSecondary,
                       side: const BorderSide(color: SDChatColors.borderSubtle),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text('Fermer'),
+                    child: const Text(
+                      'Fermer',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
                   ),
                 ),
                 if (!isPremium) ...[
                   const SizedBox(width: 10),
                   Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            backgroundColor: SDChatColors.surface,
-                            content: Text(
-                              'L\'intégration des abonnements Stripe arrive dans la prochaine étape (Mission 8) !',
-                              style: TextStyle(color: SDChatColors.textPrimary),
-                            ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: SDChatColors.primary.withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 2),
                           ),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: SDChatColors.primary,
-                        foregroundColor: SDChatColors.background,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ],
                       ),
-                      child: const Text(
-                        'Passer Premium',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(context).pop();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const PremiumScreen(),
+                            ),
+                          ).then((_) => onRefresh?.call());
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: SDChatColors.primary,
+                          foregroundColor: SDChatColors.background,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text(
+                          'Passer Premium',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),

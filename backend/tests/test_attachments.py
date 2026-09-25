@@ -48,6 +48,12 @@ def test_attachment_upload_too_large():
 
 
 def test_attachment_lifecycle_txt_and_image():
+    from app.database.connection import db_manager
+    with db_manager.connect() as conn:
+        conn.run(
+            "DELETE FROM public.chat_user_usage WHERE user_id = '00000000-0000-0000-0000-000000000001'"
+        )
+
     # 1. Upload d'un fichier texte TXT valide
     txt_content = b"Voici un document de test pour SD CHAT AI Mission 5."
     response = client.post(

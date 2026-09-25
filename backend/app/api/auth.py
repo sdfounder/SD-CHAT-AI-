@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from app.services.auth_service import AuthService
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class SignUpRequest(BaseModel):

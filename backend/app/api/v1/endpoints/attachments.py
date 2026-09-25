@@ -1,3 +1,5 @@
+import os
+import re
 import uuid
 import logging
 from typing import Optional
@@ -72,12 +74,22 @@ async def upload_attachment(
     """
     Téléverse et stocke de façon sécurisée une image ou un fichier TXT/MD/CSV.
     Contrôle strict de la taille (< 10 Mo) et du type MIME.
+    Validation d'autorisation sur la conversation_id (protection contre IDOR).
     """
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nom de fichier invalide.",
         )
+
+    # Protection IDOR : Vérification que la conversation appartient à l'utilisateur connecté
+    if conversation_id:
+        conv = ChatRepository.get_conversation(conversation_id, current_user.id)
+        if not conv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation introuvable ou accès non autorisé.",
+            )
 
     file_type = _determine_file_type(file.filename, file.content_type)
 
@@ -101,7 +113,14 @@ async def upload_attachment(
     QuotaService.check_and_consume_attachment_quota(current_user.id)
 
     attachment_id = str(uuid.uuid4())
-    safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+
+    # Assainissement strict du nom de fichier contre path traversal et caractères dangereux
+    raw_name = os.path.basename(file.filename)
+    clean_name = re.sub(r'[\x00-\x1f\x7f/\\]', '', raw_name).strip()
+    safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', clean_name)
+    if not safe_filename or safe_filename.startswith('.'):
+        safe_filename = f"file_{attachment_id[:8]}"
+
     storage_path = f"{current_user.id}/{attachment_id}/{safe_filename}"
     mime_type = file.content_type or ("image/jpeg" if file_type == "image" else "text/plain")
 
@@ -158,6 +177,7 @@ async def get_attachment_raw(
     headers = {
         "Content-Disposition": f'inline; filename="{blob_data["file_name"]}"',
         "Content-Length": str(blob_data["file_size_bytes"]),
+        "Cache-Control": "private, max-age=86400, immutable",
     }
     return Response(
         content=blob_data["content_bytes"],

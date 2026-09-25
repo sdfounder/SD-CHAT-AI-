@@ -1,0 +1,1975 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SD CHAT AI — Administration Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #08090A;
+      --canvas: #0E1013;
+      --surface: #14171B;
+      --surface-hover: #1A1E24;
+      --surface-highlight: #242A33;
+      --border-subtle: #1F242B;
+      --border-medium: #2D333D;
+      --border-highlight: #404855;
+      --primary: #E5A93C;
+      --primary-glow: rgba(229, 169, 60, 0.25);
+      --primary-dim: rgba(229, 169, 60, 0.12);
+      --secondary: #CBD5E1;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --success: #10B981;
+      --error: #EF4444;
+      --warning: #F59E0B;
+      --info: #3B82F6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text-primary);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--canvas); }
+    ::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 3px; }
+
+    /* Top Navbar */
+    .navbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(12px);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand-logo {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #F5B744, #C68A27);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; color: #08090A; font-size: 16px;
+      box-shadow: 0 0 16px var(--primary-glow);
+    }
+    .brand-title {
+      font-size: 16px; font-weight: 700; color: var(--text-primary);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .brand-badge {
+      background: var(--primary-dim); color: var(--primary);
+      border: 1px solid rgba(229, 169, 60, 0.3);
+      padding: 2px 8px; border-radius: 6px; font-size: 11px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    .nav-controls { display: flex; align-items: center; gap: 12px; }
+
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success); box-shadow: 0 0 8px var(--success);
+      display: inline-block; animation: pulse 2s infinite;
+    }
+    .pulse-dot.offline { background: var(--text-muted); box-shadow: none; animation: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
+
+    .connection-status {
+      display: flex; align-items: center; gap: 8px; font-size: 12px;
+      color: var(--text-secondary); background: var(--canvas);
+      padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border-subtle);
+    }
+
+    .btn {
+      background: var(--surface-highlight); color: var(--text-primary);
+      border: 1px solid var(--border-medium); padding: 8px 14px;
+      border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center;
+      gap: 6px; transition: all 0.15s ease; font-family: inherit;
+    }
+    .btn:hover { background: var(--border-medium); border-color: var(--border-highlight); }
+    .btn-primary { background: var(--primary); color: #08090A; border-color: var(--primary); box-shadow: 0 2px 10px var(--primary-glow); }
+    .btn-primary:hover { background: #F5B744; border-color: #F5B744; }
+    .btn-danger { background: rgba(239, 68, 68, 0.15); color: var(--error); border-color: rgba(239, 68, 68, 0.3); }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
+    .btn-warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); border-color: rgba(245, 158, 11, 0.3); }
+    .btn-warning:hover { background: rgba(245, 158, 11, 0.25); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    /* Layout */
+    .app-container { display: flex; flex: 1; min-height: calc(100vh - 61px); }
+
+    /* Sidebar */
+    .sidebar {
+      width: 250px; background: var(--canvas);
+      border-right: 1px solid var(--border-subtle);
+      padding: 16px 10px; display: flex; flex-direction: column; gap: 4px;
+    }
+    .nav-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; color: var(--text-secondary);
+      border-radius: 8px; font-size: 13.5px; font-weight: 500;
+      transition: all 0.15s ease; cursor: pointer; user-select: none;
+    }
+    .nav-item:hover { color: var(--text-primary); background: var(--surface); }
+    .nav-item.active {
+      color: var(--primary); background: var(--primary-dim);
+      font-weight: 600; border: 1px solid rgba(229, 169, 60, 0.25);
+    }
+    .nav-badge {
+      background: var(--surface-highlight); color: var(--text-primary);
+      padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    }
+    .nav-badge.alert { background: var(--error); color: #fff; }
+    .nav-badge.warn { background: var(--warning); color: #000; }
+
+    .sidebar-footer {
+      margin-top: auto; padding: 12px; background: var(--surface);
+      border-radius: 10px; border: 1px solid var(--border-subtle);
+      font-size: 11px; color: var(--text-muted); line-height: 1.4;
+    }
+
+    /* Content Area */
+    .content-area { flex: 1; padding: 24px 32px; max-width: 1440px; margin: 0 auto; width: 100%; }
+
+    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
+    .page-title { font-size: 20px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+    .page-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border-subtle);
+      border-radius: 12px; padding: 18px; transition: all 0.2s ease;
+    }
+    .stat-card:hover { border-color: var(--border-medium); }
+    .stat-card.accent { border-color: rgba(229, 169, 60, 0.3); background: linear-gradient(180deg, var(--surface) 0%, rgba(229, 169, 60, 0.04) 100%); }
+    .stat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .stat-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-icon { font-size: 18px; }
+    .stat-value { font-size: 26px; font-weight: 800; color: var(--text-primary); margin-bottom: 4px; }
+    .stat-sub { font-size: 12px; color: var(--text-muted); }
+
+    /* Panels & Tables */
+    .panel { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+    .panel-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+    .panel-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    .table-responsive { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+    th { padding: 12px 14px; background: var(--canvas); color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+    td { padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; color: var(--text-primary); }
+    tr:hover td { background: var(--surface-hover); }
+
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+    .badge-free { background: rgba(148, 163, 184, 0.15); color: #94A3B8; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .badge-premium { background: var(--primary-dim); color: var(--primary); border: 1px solid rgba(229, 169, 60, 0.35); }
+    .badge-vip { background: rgba(168, 85, 247, 0.15); color: #C084FC; border: 1px solid rgba(168, 85, 247, 0.35); }
+    .badge-black { background: rgba(248, 250, 252, 0.1); color: #F8FAFC; border: 1px solid rgba(248, 250, 252, 0.3); box-shadow: 0 0 10px rgba(255,255,255,0.1); }
+    .badge-active { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-suspended { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-blocked { background: rgba(239, 68, 68, 0.15); color: var(--error); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-pending { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-resolved { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .online-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .dot.offline { background: var(--text-muted); }
+
+    /* Forms & Inputs */
+    .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .form-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+    .form-input, .form-select, .form-textarea {
+      background: var(--canvas); border: 1px solid var(--border-medium);
+      color: var(--text-primary); padding: 9px 12px; border-radius: 8px;
+      font-size: 13px; font-family: inherit; transition: border-color 0.15s ease; width: 100%;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus { outline: none; border-color: var(--primary); }
+    .form-textarea { resize: vertical; min-height: 80px; }
+
+    /* Filters */
+    .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .pill-group { display: inline-flex; background: var(--canvas); padding: 3px; border-radius: 8px; border: 1px solid var(--border-subtle); gap: 2px; }
+    .pill-btn {
+      background: transparent; border: none; color: var(--text-secondary);
+      padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .pill-btn.active { background: var(--surface-highlight); color: var(--primary); }
+
+    /* Modals */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(8, 9, 10, 0.8);
+      backdrop-filter: blur(8px); display: flex; align-items: center;
+      justify-content: center; z-index: 100; padding: 20px;
+    }
+    .modal-content {
+      background: var(--surface); border: 1px solid var(--border-medium);
+      border-radius: 14px; width: 100%; max-width: 600px;
+      max-height: 90vh; overflow-y: auto; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .modal-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+    .modal-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+    .modal-close:hover { color: var(--text-primary); }
+
+    /* Charts */
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 20px; margin-bottom: 24px; }
+    .chart-card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 18px; }
+    .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .chart-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+    .chart-container { position: relative; height: 260px; width: 100%; }
+
+    /* Switch toggle */
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; inset: 0; background-color: var(--border-medium);
+      transition: .2s; border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background-color: white; transition: .2s; border-radius: 50%;
+    }
+    input:checked + .slider { background-color: var(--primary); }
+    input:checked + .slider:before { transform: translateX(20px); }
+
+    .hidden { display: none !important; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .sidebar { width: 70px; padding: 10px 4px; }
+      .sidebar .nav-text, .sidebar-footer { display: none; }
+      .content-area { padding: 16px; }
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="navbar">
+    <a href="#" class="brand">
+      <div class="brand-logo">SD</div>
+      <div>
+        <div class="brand-title">
+          SD CHAT AI
+          <span class="brand-badge">Super Admin</span>
+        </div>
+        <div class="brand-sub">Console d'Administration Souveraine</div>
+      </div>
+    </a>
+
+    <div class="nav-controls">
+      <div class="connection-status">
+        <span class="pulse-dot"></span>
+        <span id="backendEnv">Production (Render HTTPS)</span>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="font-size: 11.5px; color: var(--text-muted);">Rafraîchissement:</span>
+        <select id="autoRefreshSelect" class="form-input" style="width: auto; padding: 4px 8px; font-size: 12px;" onchange="updateAutoRefresh(this.value)">
+          <option value="0">Manuel</option>
+          <option value="5">5s</option>
+          <option value="10" selected>10s</option>
+          <option value="30">30s</option>
+        </select>
+      </div>
+
+      <button class="btn btn-sm" onclick="switchTab('alerts')" style="position: relative;">
+        🔔 Alertes
+        <span id="navAlertBadge" class="nav-badge alert hidden" style="position: absolute; top: -6px; right: -6px; font-size: 10px; padding: 1px 5px;">0</span>
+      </button>
+
+      <button class="btn btn-sm btn-primary" onclick="loadAllData()">
+        🔄 Actualiser
+      </button>
+
+      <button class="btn btn-sm btn-danger" onclick="handleLogout()">
+        Déconnexion
+      </button>
+    </div>
+  </header>
+
+  <!-- App Body -->
+  <div class="app-container">
+    <!-- Sidebar Navigation (10 Sections) -->
+    <aside class="sidebar">
+      <div class="nav-item active" onclick="switchTab('overview')">
+        <span>📊 <span class="nav-text">Vue d'ensemble</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('users')">
+        <span>👥 <span class="nav-text">Utilisateurs</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('plans')">
+        <span>💳 <span class="nav-text">Plans & Quotas</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('gateway')">
+        <span>⚡ <span class="nav-text">SD AI Gateway</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('analytics')">
+        <span>📈 <span class="nav-text">Analytics IA</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('feedback')">
+        <span>💬 <span class="nav-text">Commentaires</span></span>
+        <span id="sideFeedbackBadge" class="nav-badge warn hidden">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('alerts')">
+        <span>🔔 <span class="nav-text">Alertes Système</span></span>
+        <span id="sideAlertBadge" class="nav-badge alert hidden">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTab('audit')">
+        <span>🛡️ <span class="nav-text">Journal d'Audit</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('settings')">
+        <span>⚙️ <span class="nav-text">Paramètres</span></span>
+      </div>
+      <div class="nav-item" onclick="switchTab('profile')">
+        <span>👤 <span class="nav-text">Profil Admin</span></span>
+      </div>
+
+      <div class="sidebar-footer">
+        <strong>SD CHAT AI V1</strong><br>
+        Console d'Administration<br>
+        Sekou Diaby — Build the Future with AI
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- 1. VUE D'ENSEMBLE -->
+      <section id="tab-overview">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Tableau de bord de supervision</h1>
+            <p class="page-desc">Métriques en temps réel sur les utilisateurs, l'utilisation IA et les abonnements</p>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Utilisateurs Totaux</span>
+              <div class="stat-icon">👥</div>
+            </div>
+            <div class="stat-value" id="stat-total-users">-</div>
+            <div class="stat-sub">
+              <span id="stat-free-users">- Free</span> • <span id="stat-premium-users" style="color: var(--primary);">- Premium</span>
+            </div>
+          </div>
+
+          <div class="stat-card accent">
+            <div class="stat-header">
+              <span class="stat-label">En Ligne (Temps Réel)</span>
+              <div class="stat-icon">🟢</div>
+            </div>
+            <div class="stat-value" id="stat-online-users" style="color: var(--success);">-</div>
+            <div class="stat-sub">Actifs dans les 5 dernières minutes</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Actifs 24h & 7j</span>
+              <div class="stat-icon">⚡</div>
+            </div>
+            <div class="stat-value" id="stat-active-24h">-</div>
+            <div class="stat-sub" id="stat-active-7d">- sur 7 jours</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Conversations & Messages</span>
+              <div class="stat-icon">💬</div>
+            </div>
+            <div class="stat-value" id="stat-total-convs">-</div>
+            <div class="stat-sub" id="stat-total-msgs">- messages échangés</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Requêtes Gemini (Auj.)</span>
+              <div class="stat-icon">🤖</div>
+            </div>
+            <div class="stat-value" id="stat-gemini-today">-</div>
+            <div class="stat-sub" id="stat-tokens-used">- tokens consommés</div>
+          </div>
+
+          <div class="stat-card accent">
+            <div class="stat-header">
+              <span class="stat-label">Abonnements Stripe</span>
+              <div class="stat-icon">💳</div>
+            </div>
+            <div class="stat-value" id="stat-active-subs" style="color: var(--primary);">-</div>
+            <div class="stat-sub">MRR Récurrent : <strong id="stat-mrr" style="color: var(--primary);">- €</strong></div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Comptes Suspendus / Bloqués</span>
+              <div class="stat-icon">🚫</div>
+            </div>
+            <div class="stat-value" id="stat-suspended-users" style="color: var(--warning);">-</div>
+            <div class="stat-sub"><span id="stat-blocked-users" style="color: var(--error);">-</span> bloqués définitivement</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">Commentaires en Attente</span>
+              <div class="stat-icon">💬</div>
+            </div>
+            <div class="stat-value" id="stat-pending-feedback" style="color: var(--warning);">-</div>
+            <div class="stat-sub">Signalements nécessitant réponse</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. UTILISATEURS -->
+      <section id="tab-users" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Gestion des Utilisateurs</h1>
+            <p class="page-desc">Suivi en direct de la présence, formules, blocages/suspensions et quotas</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="filter-bar">
+            <div style="flex: 1; max-width: 320px;">
+              <input type="text" id="userSearchInput" class="form-input" placeholder="🔍 Rechercher par email, nom ou ID..." oninput="debounceUserSearch()">
+            </div>
+
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <div class="pill-group">
+                <button class="pill-btn active" onclick="setUserTierFilter('', this)">Tous</button>
+                <button class="pill-btn" onclick="setUserTierFilter('free', this)">Free</button>
+                <button class="pill-btn" onclick="setUserTierFilter('premium', this)">Premium</button>
+                <button class="pill-btn" onclick="setUserTierFilter('vip', this)">VIP</button>
+                <button class="pill-btn" onclick="setUserTierFilter('black', this)">Black</button>
+              </div>
+
+              <div class="pill-group">
+                <button class="pill-btn active" onclick="setUserStatusFilter('', this)">Tous statuts</button>
+                <button class="pill-btn" onclick="setUserStatusFilter('online', this)">🟢 En ligne</button>
+                <button class="pill-btn" onclick="setUserStatusFilter('active', this)">Actifs</button>
+                <button class="pill-btn" onclick="setUserStatusFilter('suspended', this)">Suspendus</button>
+                <button class="pill-btn" onclick="setUserStatusFilter('blocked', this)">Bloqués</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utilisateur</th>
+                  <th>Présence</th>
+                  <th>Formule</th>
+                  <th>Statut</th>
+                  <th>Appareil</th>
+                  <th>Quotas Auj.</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody">
+                <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Chargement des utilisateurs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. PLANS & ABONNEMENTS -->
+      <section id="tab-plans" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Plans & Abonnements SD</h1>
+            <p class="page-desc">Configuration des limites, formules officielles (Free, Premium, VIP, Black) et Stripe</p>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-bottom: 24px;" id="plansCardsContainer">
+          <!-- Injecté dynamiquement -->
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Abonnements Stripe & Mobile Money Synchronisés</h2>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Utilisateur</th>
+                  <th>Formule</th>
+                  <th>Statut</th>
+                  <th>Customer ID</th>
+                  <th>Échéance</th>
+                </tr>
+              </thead>
+              <tbody id="subscriptionsTableBody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des abonnements...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. SD AI GATEWAY -->
+      <section id="tab-gateway" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Supervision SD AI Gateway</h1>
+            <p class="page-desc">Contrôle des 6 fournisseurs IA, disjoncteurs de sécurité (circuit breaker) et modèles</p>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 24px;" id="gatewayProvidersContainer">
+          <!-- Cartes providers injectées dynamiquement -->
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Catalogue des Modèles d'Inférence</h2>
+          </div>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Modèle</th>
+                  <th>Fournisseur</th>
+                  <th>Type</th>
+                  <th>Contexte</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody id="gatewayModelsTableBody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement du catalogue...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. ANALYTICS IA -->
+      <section id="tab-analytics" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Analytics & Inférences IA</h1>
+            <p class="page-desc">Télémétrie réelle de Google Gemini, volumétries temporelles, quotas, latences et coûts estimés</p>
+          </div>
+        </div>
+
+        <div class="filter-bar">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; font-weight: 700; color: var(--text-secondary);">Période :</span>
+            <div class="pill-group" id="periodPillGroup">
+              <button class="pill-btn" onclick="setAnalyticsPeriod('24h')">24h</button>
+              <button class="pill-btn active" onclick="setAnalyticsPeriod('7d')">7 Jours</button>
+              <button class="pill-btn" onclick="setAnalyticsPeriod('30d')">30 Jours</button>
+              <button class="pill-btn" onclick="setAnalyticsPeriod('all')">Tout</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">📈 Évolution Temporelle des Requêtes IA</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="chart-requests-canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">🔢 Consommation de Tokens</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="chart-tokens-canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">⚡ Latence & Temps au Premier Token (TTFT)</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="chart-latency-canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-header">
+              <span class="chart-title">📎 Types de Pièces Jointes</span>
+            </div>
+            <div class="chart-container">
+              <canvas id="chart-mime-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. CENTRE DE COMMENTAIRES (FEEDBACK) -->
+      <section id="tab-feedback" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Centre de Commentaires & Signalements</h1>
+            <p class="page-desc">Gestion des retours utilisateurs, diagnostic d'appareils et réponses avec notification in-app</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="filter-bar">
+            <div class="pill-group">
+              <button class="pill-btn active" onclick="setFeedbackStatusFilter('', this)">Tous</button>
+              <button class="pill-btn" onclick="setFeedbackStatusFilter('pending', this)">En attente</button>
+              <button class="pill-btn" onclick="setFeedbackStatusFilter('in_progress', this)">En cours</button>
+              <button class="pill-btn" onclick="setFeedbackStatusFilter('resolved', this)">Résolus</button>
+              <button class="pill-btn" onclick="setFeedbackStatusFilter('closed', this)">Fermés</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Utilisateur</th>
+                  <th>Catégorie</th>
+                  <th>Sujet</th>
+                  <th>Statut</th>
+                  <th>Réponse</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="feedbackTableBody">
+                <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Chargement des commentaires...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. ALERTES SYSTÈME -->
+      <section id="tab-alerts" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Alertes & Surveillance Système</h1>
+            <p class="page-desc">Notification en temps réel des anomalies, disjoncteurs IA et demandes bloquantes</p>
+          </div>
+        </div>
+
+        <div id="alertsContainer" style="display: flex; flex-direction: column; gap: 14px;">
+          <!-- Injecté dynamiquement -->
+        </div>
+      </section>
+
+      <!-- 8. JOURNAL D'AUDIT -->
+      <section id="tab-audit" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Piste d'Audit & Journal des Erreurs</h1>
+            <p class="page-desc">Traçabilité complète des actions administratives et incidents backend</p>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom: 24px;">
+          <h2 class="panel-title" style="margin-bottom: 14px;">Historique des Opérations Administratives</h2>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Horodatage</th>
+                  <th>Admin ID</th>
+                  <th>Action</th>
+                  <th>Cible</th>
+                  <th>Détails</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement du journal d'audit...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2 class="panel-title" style="margin-bottom: 14px;">Erreurs Système Récentes</h2>
+          <div class="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>Horodatage</th>
+                  <th>Source</th>
+                  <th>Type d'Erreur</th>
+                  <th>Message</th>
+                  <th>Utilisateur</th>
+                </tr>
+              </thead>
+              <tbody id="errorsTableBody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des erreurs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9. PARAMÈTRES SYSTÈME -->
+      <section id="tab-settings" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Paramètres Globaux du Système</h1>
+            <p class="page-desc">Configuration en temps réel du mode maintenance, des versions d'applications et annonces</p>
+          </div>
+        </div>
+
+        <div class="panel" style="max-width: 800px;">
+          <form onsubmit="saveAllSettings(event)">
+            <!-- Mode Maintenance -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px;">
+              <div>
+                <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">Mode Maintenance Général</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Verrouille l'accès à l'application mobile pour les utilisateurs normaux.</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="setting_maintenance_toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label class="form-label">Message de Maintenance affiché aux utilisateurs</label>
+              <textarea id="setting_maintenance_msg" class="form-textarea" placeholder="SD CHAT AI est en maintenance temporaire..."></textarea>
+            </div>
+
+            <!-- Inscriptions -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px;">
+              <div>
+                <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">Inscriptions Ouvertes</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Autoriser la création de nouveaux comptes sur SD CHAT AI.</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="setting_registrations_toggle" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Version Minimale -->
+            <div style="padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px;">
+              <div class="form-group">
+                <label class="form-label">Version Minimale Requise (Flutter Mobile)</label>
+                <input type="text" id="setting_min_version" class="form-input" style="max-width: 200px;" value="1.0.0">
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="setting_force_update">
+                <label for="setting_force_update" style="font-size: 12.5px; color: var(--text-secondary);">Forcer la mise à jour obligatoire sur le Play Store</label>
+              </div>
+            </div>
+
+            <!-- Annonce Globale -->
+            <div style="margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div>
+                  <div style="font-weight: 700; font-size: 14px; color: var(--text-primary);">Bannière d'Annonce Globale</div>
+                  <div style="font-size: 12px; color: var(--text-muted);">Afficher une notification bandeau dans toute l'application.</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="setting_announcement_toggle">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Titre de l'Annonce</label>
+                <input type="text" id="setting_announcement_title" class="form-input" placeholder="Ex: Mise à jour SD AI Gateway disponible">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Message détaillé</label>
+                <textarea id="setting_announcement_msg" class="form-textarea" placeholder="Détails de l'annonce..."></textarea>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end;">
+              <button type="submit" class="btn btn-primary">💾 Enregistrer tous les paramètres</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- 10. PROFIL ADMIN -->
+      <section id="tab-profile" class="hidden">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Profil Administrateur Officiel</h1>
+            <p class="page-desc">Informations du créateur et privilèges Super Admin de la plateforme</p>
+          </div>
+        </div>
+
+        <div class="panel" style="max-width: 600px;">
+          <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px;">
+            <div class="brand-logo" style="width: 54px; height: 54px; font-size: 22px;">SD</div>
+            <div>
+              <div style="font-size: 18px; font-weight: 800; color: var(--text-primary);" id="adminProfileName">Sekou Diaby</div>
+              <div style="font-size: 13px; color: var(--primary); font-weight: 600;">SUPER ADMINISTRATEUR PRINCIPAL</div>
+              <div style="font-size: 12px; color: var(--text-muted);" id="adminProfileEmail">sekoudiaby433@gmail.com</div>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-subtle); padding-top: 16px; font-size: 13px; display: flex; flex-direction: column; gap: 10px;">
+            <div><strong>Écosystème :</strong> SD — Build the Future with AI</div>
+            <div><strong>Projet Supabase :</strong> SD-DEV (aws-1-eu-west-1.pooler.supabase.com)</div>
+            <div><strong>Règle Fondamentale :</strong> Premier compte inscrit automatiquement désigné Administrateur Officiel</div>
+            <div><strong>Confidentialité :</strong> Chiffrement et protection absolue des conversations utilisateurs privées</div>
+          </div>
+
+          <div style="margin-top: 24px;">
+            <button class="btn btn-danger" onclick="handleLogout()">Fermer la session Administrateur</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: FICHE UTILISATEUR & ACTIONS -->
+  <div id="userModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="userModalTitle">Fiche Utilisateur</h3>
+        <button class="modal-close" onclick="closeUserModal()">&times;</button>
+      </div>
+      <div id="userModalBody" style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Détails injectés -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: SUSPENSION AVEC DURÉE -->
+  <div id="suspendModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Suspendre le compte</h3>
+        <button class="modal-close" onclick="closeSuspendModal()">&times;</button>
+      </div>
+      <form onsubmit="submitUserSuspension(event)">
+        <input type="hidden" id="suspendUserId">
+        <div class="form-group">
+          <label class="form-label">Durée de la suspension</label>
+          <select id="suspendDuration" class="form-select">
+            <option value="1">1 Heure</option>
+            <option value="6">6 Heures</option>
+            <option value="24" selected>24 Heures (1 jour)</option>
+            <option value="72">3 Jours</option>
+            <option value="168">7 Jours (1 semaine)</option>
+            <option value="0">Durée indéterminée</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Motif explicite de la suspension (obligatoire)</label>
+          <textarea id="suspendReason" class="form-textarea" placeholder="Ex: Abus de requêtes, signalement..." required></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="closeSuspendModal()">Annuler</button>
+          <button type="submit" class="btn btn-warning">Confirmer la suspension</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: BLOCAGE PERMANENT -->
+  <div id="blockModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="color: var(--error);">Bloquer définitivement</h3>
+        <button class="modal-close" onclick="closeBlockModal()">&times;</button>
+      </div>
+      <form onsubmit="submitUserBlock(event)">
+        <input type="hidden" id="blockUserId">
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 14px;">
+          Attention : Le blocage empêchera définitivement toute utilisation de l'application par ce compte.
+        </div>
+        <div class="form-group">
+          <label class="form-label">Motif obligatoire du blocage</label>
+          <textarea id="blockReason" class="form-textarea" placeholder="Ex: Violation grave des conditions d'utilisation..." required minlength="4"></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="closeBlockModal()">Annuler</button>
+          <button type="submit" class="btn btn-danger">Bloquer le compte</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DÉTAIL FEEDBACK & RÉPONSE -->
+  <div id="feedbackModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Traitement du Signalement</h3>
+        <button class="modal-close" onclick="closeFeedbackModal()">&times;</button>
+      </div>
+      <div id="feedbackModalDetails" style="margin-bottom: 16px;"></div>
+      <form onsubmit="submitFeedbackReplyForm(event)">
+        <input type="hidden" id="replyFeedbackId">
+        <div class="form-group">
+          <label class="form-label">Réponse officielle à l'utilisateur (Notification in-app)</label>
+          <textarea id="replyFeedbackContent" class="form-textarea" placeholder="Rédigez votre réponse ici..." required></textarea>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+          <select id="updateFeedbackStatusSelect" class="form-select" style="width: auto;">
+            <option value="pending">En attente</option>
+            <option value="in_progress">En cours</option>
+            <option value="resolved" selected>Résolu</option>
+            <option value="closed">Fermé</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Envoyer la réponse</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ÉDITION QUOTAS PLAN -->
+  <div id="planEditModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="planEditTitle">Modifier le Plan</h3>
+        <button class="modal-close" onclick="closePlanModal()">&times;</button>
+      </div>
+      <form onsubmit="submitPlanUpdate(event)">
+        <input type="hidden" id="editPlanId">
+        <div class="form-group">
+          <label class="form-label">Limite de requêtes IA / jour</label>
+          <input type="number" id="editPlanQueries" class="form-input" min="1" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Limite OCR / jour</label>
+          <input type="number" id="editPlanOcr" class="form-input" min="0" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Prix mensuel (centimes)</label>
+          <input type="number" id="editPlanPrice" class="form-input" min="0" required>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="closePlanModal()">Annuler</button>
+          <button type="submit" class="btn btn-primary">Enregistrer les quotas</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL AUTHENTIFICATION / PREMIER ADMIN -->
+  <div id="authModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 440px; text-align: center;">
+      <div class="brand-logo" style="margin: 0 auto 14px; width: 48px; height: 48px; font-size: 20px;">SD</div>
+      <h2 style="font-size: 20px; font-weight: 800; color: var(--text-primary); margin-bottom: 4px;" id="authTitle">Connexion Administrateur</h2>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;" id="authSubtitle">Console officielle SD CHAT AI</p>
+
+      <div id="authRuleAlert" class="panel hidden" style="background: rgba(229, 169, 60, 0.1); border-color: rgba(229, 169, 60, 0.3); font-size: 12.5px; text-align: left; padding: 12px; margin-bottom: 16px;">
+        👑 <strong>Configuration Initiale :</strong> Aucun compte administrateur n'est encore configuré. Le premier compte créé deviendra obligatoirement le <strong>SUPER ADMINISTRATEUR PRINCIPAL</strong> de SD CHAT AI.
+      </div>
+
+      <div id="loginError" style="background: rgba(239, 68, 68, 0.15); color: var(--error); border: 1px solid rgba(239, 68, 68, 0.3); padding: 10px; border-radius: 8px; font-size: 12.5px; margin-bottom: 14px; text-align: left;" class="hidden"></div>
+
+      <form id="adminAuthForm" onsubmit="handleAuthSubmit(event)">
+        <div class="form-group hidden" id="fullNameGroup">
+          <label style="display:block; text-align:left; font-size:12px; margin-bottom:4px; color:var(--text-muted); font-weight:600;">Nom complet / Identifiant</label>
+          <input type="text" id="authFullName" class="form-input" placeholder="Ex: Sekou Diaby">
+        </div>
+        <div class="form-group">
+          <label style="display:block; text-align:left; font-size:12px; margin-bottom:4px; color:var(--text-muted); font-weight:600;">Adresse email</label>
+          <input type="email" id="authEmail" class="form-input" placeholder="admin@sd.media" required>
+        </div>
+        <div class="form-group">
+          <label style="display:block; text-align:left; font-size:12px; margin-bottom:4px; color:var(--text-muted); font-weight:600;">Mot de passe</label>
+          <input type="password" id="authPassword" class="form-input" placeholder="Minimum 6 caractères" required minlength="6">
+        </div>
+        <div class="form-group hidden" id="passwordConfirmGroup">
+          <label style="display:block; text-align:left; font-size:12px; margin-bottom:4px; color:var(--text-muted); font-weight:600;">Confirmation du mot de passe</label>
+          <input type="password" id="authPasswordConfirm" class="form-input" placeholder="Retapez votre mot de passe">
+        </div>
+        <button type="submit" id="authSubmitBtn" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 10px; font-weight: 700; padding: 11px;">
+          Se connecter
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const isFirebaseHosting = window.location.hostname.includes('web.app') || window.location.hostname.includes('firebaseapp.com');
+    const DEFAULT_BACKEND_URL = 'https://sd-chat-ai-backend.onrender.com';
+    const isLocalBackend = (window.location.port === '8000' || window.location.port === '8080');
+    let API_BASE = isLocalBackend ? '' : (localStorage.getItem('sd_backend_url') || DEFAULT_BACKEND_URL);
+
+    function apiFetch(path, options = {}) {
+      const url = path.startsWith('http') ? path : (API_BASE + path);
+      return fetch(url, options);
+    }
+
+    let authToken = localStorage.getItem('sd_admin_token') || '';
+    let systemAuthStatus = { has_admin: true, registration_open: false };
+    let currentTierFilter = '';
+    let currentStatusFilter = '';
+    let currentFeedbackStatus = '';
+    let searchDebounceTimer = null;
+    let autoRefreshInterval = null;
+    let cachedUsers = [];
+    let cachedFeedback = [];
+    let cachedPlans = [];
+
+    // Charts references
+    let chartRequests = null, chartTokens = null, chartLatency = null, chartMime = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await checkAdminInitStatus();
+      if (!systemAuthStatus.has_admin) {
+        localStorage.removeItem('sd_admin_token');
+        authToken = '';
+        showAuthModal();
+      } else if (!authToken) {
+        showAuthModal();
+      } else {
+        verifyAdminSession();
+      }
+      updateAutoRefresh(10);
+    });
+
+    function renderAuthMode() {
+      const ruleAlert = document.getElementById('authRuleAlert');
+      const title = document.getElementById('authTitle');
+      const subtitle = document.getElementById('authSubtitle');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      const nameGroup = document.getElementById('fullNameGroup');
+      const confirmGroup = document.getElementById('passwordConfirmGroup');
+      const nameInput = document.getElementById('authFullName');
+      const confirmInput = document.getElementById('authPasswordConfirm');
+
+      if (!systemAuthStatus.has_admin) {
+        // CAS 1 : AUCUN ADMINISTRATEUR N'EXISTE -> CRÉER LE COMPTE ADMINISTRATEUR
+        ruleAlert.classList.remove('hidden');
+        title.textContent = "CRÉER LE COMPTE ADMINISTRATEUR";
+        subtitle.textContent = "Initialisation du Super Administrateur Principal";
+        submitBtn.textContent = "Créer le compte administrateur";
+        nameGroup.classList.remove('hidden');
+        confirmGroup.classList.remove('hidden');
+        if (nameInput) nameInput.required = true;
+        if (confirmInput) confirmInput.required = true;
+      } else {
+        // CAS 2 : UN ADMINISTRATEUR EXISTE DÉJÀ -> CONNEXION ADMINISTRATEUR
+        ruleAlert.classList.add('hidden');
+        title.textContent = "CONNEXION ADMINISTRATEUR";
+        subtitle.textContent = systemAuthStatus.admin_email_masked 
+          ? `Accès réservé (${systemAuthStatus.admin_email_masked})` 
+          : "Console officielle SD CHAT AI";
+        submitBtn.textContent = "Se connecter";
+        nameGroup.classList.add('hidden');
+        confirmGroup.classList.add('hidden');
+        if (nameInput) { nameInput.required = false; nameInput.value = ''; }
+        if (confirmInput) { confirmInput.required = false; confirmInput.value = ''; }
+      }
+    }
+
+    async function checkAdminInitStatus() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/auth/status');
+        if (resp.ok) {
+          systemAuthStatus = await resp.json();
+          renderAuthMode();
+        } else if (resp.status === 404) {
+          console.warn("Backend admin endpoints not yet registered on current base");
+        }
+      } catch (e) {
+        console.warn('Statut auth:', e);
+      }
+    }
+
+    function showAuthModal() { document.getElementById('authModal').classList.remove('hidden'); }
+    function hideAuthModal() { document.getElementById('authModal').classList.add('hidden'); }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      const confirmPassword = document.getElementById('authPasswordConfirm')?.value || '';
+      const fullName = document.getElementById('authFullName')?.value.trim() || '';
+      const errBox = document.getElementById('loginError');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      errBox.classList.add('hidden');
+
+      if (!systemAuthStatus.has_admin) {
+        if (!fullName) {
+          errBox.textContent = "Veuillez renseigner votre nom complet ou identifiant.";
+          errBox.classList.remove('hidden');
+          return;
+        }
+        if (password.length < 6) {
+          errBox.textContent = "Le mot de passe doit comporter au moins 6 caractères.";
+          errBox.classList.remove('hidden');
+          return;
+        }
+        if (password !== confirmPassword) {
+          errBox.textContent = "Les mots de passe ne correspondent pas. Veuillez vérifier votre saisie.";
+          errBox.classList.remove('hidden');
+          return;
+        }
+      }
+
+      const endpoint = systemAuthStatus.has_admin ? '/api/v1/admin/auth/login' : '/api/v1/admin/auth/register';
+      const body = { email, password };
+      if (!systemAuthStatus.has_admin) {
+        body.full_name = fullName;
+      }
+
+      submitBtn.disabled = true;
+      const initialBtnText = submitBtn.textContent;
+      submitBtn.textContent = "Traitement en cours...";
+
+      try {
+        const resp = await apiFetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (resp.status === 404) {
+          throw new Error("Point d'accès introuvable sur le serveur backend (Erreur 404). Vérifiez que le serveur est bien déployé.");
+        }
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.detail || `Erreur d'authentification (${resp.status})`);
+        }
+
+        authToken = data.access_token;
+        localStorage.setItem('sd_admin_token', authToken);
+        hideAuthModal();
+
+        // Basculer l'état système pour que la prochaine vue soit en mode connexion
+        systemAuthStatus.has_admin = true;
+        systemAuthStatus.registration_open = false;
+        renderAuthMode();
+
+        verifyAdminSession();
+      } catch (err) {
+        errBox.textContent = err.message || "Erreur de communication avec le serveur backend.";
+        errBox.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = initialBtnText;
+      }
+    }
+
+    async function verifyAdminSession() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/auth/me', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) throw new Error('Session expirée');
+        const admin = await resp.json();
+        document.getElementById('adminProfileEmail').textContent = admin.email;
+        if (admin.full_name) document.getElementById('adminProfileName').textContent = admin.full_name;
+        loadAllData();
+      } catch (e) {
+        handleLogout();
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('sd_admin_token');
+      authToken = '';
+      checkAdminInitStatus().then(() => {
+        showAuthModal();
+      });
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+      const activeNav = Array.from(document.querySelectorAll('.sidebar .nav-item')).find(el => el.getAttribute('onclick')?.includes(tabId));
+      if (activeNav) activeNav.classList.add('active');
+
+      document.querySelectorAll('main > section').forEach(sec => sec.classList.add('hidden'));
+      const sec = document.getElementById(`tab-${tabId}`);
+      if (sec) sec.classList.remove('hidden');
+
+      if (tabId === 'users') loadUsers();
+      if (tabId === 'plans') loadPlans();
+      if (tabId === 'gateway') loadAiGateway();
+      if (tabId === 'analytics') loadAnalytics();
+      if (tabId === 'feedback') loadFeedback();
+      if (tabId === 'alerts') loadAlerts();
+      if (tabId === 'audit') loadAuditLogs();
+      if (tabId === 'settings') loadSystemSettings();
+    }
+
+    function updateAutoRefresh(seconds) {
+      if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+      const s = parseInt(seconds, 10);
+      if (s > 0) {
+        autoRefreshInterval = setInterval(() => {
+          if (authToken) loadAllData();
+        }, s * 1000);
+      }
+    }
+
+    async function loadAllData() {
+      if (!authToken) return;
+      await Promise.all([loadStats(), loadAlertsBadge()]);
+      const active = document.querySelector('main > section:not(.hidden)');
+      if (active) {
+        const id = active.id.replace('tab-', '');
+        if (id === 'users') loadUsers();
+        else if (id === 'plans') loadPlans();
+        else if (id === 'gateway') loadAiGateway();
+        else if (id === 'analytics') loadAnalytics();
+        else if (id === 'feedback') loadFeedback();
+        else if (id === 'alerts') loadAlerts();
+        else if (id === 'audit') loadAuditLogs();
+        else if (id === 'settings') loadSystemSettings();
+      }
+    }
+
+    // --- 1. Stats Consolidées ---
+    async function loadStats() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/stats', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+
+        document.getElementById('stat-total-users').textContent = d.total_users;
+        document.getElementById('stat-free-users').textContent = `${d.free_users_count} Free`;
+        document.getElementById('stat-premium-users').textContent = `${d.premium_users_count} Premium`;
+        document.getElementById('stat-online-users').textContent = d.online_users_count || 0;
+        document.getElementById('stat-active-24h').textContent = d.active_users_24h;
+        document.getElementById('stat-active-7d').textContent = `${d.active_users_7d} sur 7 jours`;
+        document.getElementById('stat-total-convs').textContent = d.total_conversations;
+        document.getElementById('stat-total-msgs').textContent = `${d.total_messages} messages`;
+        document.getElementById('stat-gemini-today').textContent = d.total_gemini_requests_today;
+        document.getElementById('stat-tokens-used').textContent = `${d.total_tokens_estimated.toLocaleString()} tokens`;
+        document.getElementById('stat-active-subs').textContent = d.stripe_active_subscriptions;
+        document.getElementById('stat-mrr').textContent = `${d.stripe_mrr_eur.toFixed(2)} €`;
+        document.getElementById('stat-suspended-users').textContent = d.suspended_users_count;
+        document.getElementById('stat-blocked-users').textContent = d.blocked_users_count || 0;
+        document.getElementById('stat-pending-feedback').textContent = d.pending_feedback_count || 0;
+
+        const fbBadge = document.getElementById('sideFeedbackBadge');
+        if (d.pending_feedback_count > 0) {
+          fbBadge.textContent = d.pending_feedback_count;
+          fbBadge.classList.remove('hidden');
+        } else {
+          fbBadge.classList.add('hidden');
+        }
+      } catch (e) {
+        console.error('Stats error', e);
+      }
+    }
+
+    async function loadAlertsBadge() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/alerts', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        const unread = d.total_unread || 0;
+        const navB = document.getElementById('navAlertBadge');
+        const sideB = document.getElementById('sideAlertBadge');
+        if (unread > 0) {
+          navB.textContent = unread; navB.classList.remove('hidden');
+          sideB.textContent = unread; sideB.classList.remove('hidden');
+        } else {
+          navB.classList.add('hidden'); sideB.classList.add('hidden');
+        }
+      } catch (e) {}
+    }
+
+    // --- 2. Utilisateurs ---
+    async function loadUsers() {
+      const q = document.getElementById('userSearchInput').value.trim();
+      const params = new URLSearchParams({ page: 1, limit: 100 });
+      if (q) params.append('q', q);
+      if (currentTierFilter) params.append('tier', currentTierFilter);
+      if (currentStatusFilter) params.append('status', currentStatusFilter);
+
+      try {
+        const resp = await apiFetch(`/api/v1/admin/users?${params.toString()}`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        cachedUsers = data.users || [];
+        renderUsers(cachedUsers);
+      } catch (e) {
+        console.error('Users error', e);
+      }
+    }
+
+    function renderUsers(users) {
+      const tbody = document.getElementById('usersTableBody');
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Aucun utilisateur trouvé.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = users.map(u => {
+        const presence = u.is_online
+          ? `<span class="online-indicator"><span class="dot online"></span> En ligne</span>`
+          : `<span class="online-indicator"><span class="dot offline"></span> Hors ligne</span>`;
+
+        let statusBadge = `<span class="badge badge-active">Actif</span>`;
+        if (u.status === 'blocked') statusBadge = `<span class="badge badge-blocked">Bloqué</span>`;
+        else if (u.status === 'suspended' || u.is_suspended) statusBadge = `<span class="badge badge-suspended">Suspendu</span>`;
+
+        const tierBadge = `<span class="badge badge-${u.tier}">${u.tier}</span>`;
+        const device = u.device_platform ? `${u.device_platform} (${u.device_name || 'App'})` : 'Mobile/Web';
+
+        return `
+          <tr>
+            <td>
+              <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(u.full_name || 'Utilisateur')}</div>
+              <div style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(u.email || u.id)}</div>
+            </td>
+            <td>${presence}</td>
+            <td>${tierBadge}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size: 12px; color: var(--text-secondary);">${device}</td>
+            <td>
+              <div style="font-size: 12px;"><strong>${u.today_messages_used}</strong> msgs • ${u.total_conversations} convs</div>
+            </td>
+            <td>
+              <button class="btn btn-sm" onclick="openUserModal('${u.id}')">Détails & Actions</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function debounceUserSearch() {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(loadUsers, 250);
+    }
+    function setUserTierFilter(tier, btn) {
+      currentTierFilter = tier;
+      btn.parentElement.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadUsers();
+    }
+    function setUserStatusFilter(status, btn) {
+      currentStatusFilter = status;
+      btn.parentElement.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadUsers();
+    }
+
+    // Modal Utilisateur
+    function openUserModal(userId) {
+      const u = cachedUsers.find(x => x.id === userId);
+      if (!u) return;
+
+      document.getElementById('userModalTitle').textContent = `Fiche : ${u.full_name || u.email}`;
+      const body = document.getElementById('userModalBody');
+
+      const isSusp = u.status === 'suspended' || u.is_suspended;
+      const isBlk = u.status === 'blocked';
+
+      body.innerHTML = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; background: var(--canvas); padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+          <div><strong>ID :</strong> <code style="font-size: 11px;">${u.id}</code></div>
+          <div><strong>Email :</strong> ${escapeHtml(u.email || '-')}</div>
+          <div><strong>Formule :</strong> <span class="badge badge-${u.tier}">${u.tier}</span></div>
+          <div><strong>Statut :</strong> ${isBlk ? '<span class="badge badge-blocked">Bloqué</span>' : (isSusp ? '<span class="badge badge-suspended">Suspendu</span>' : '<span class="badge badge-active">Actif</span>')}</div>
+          <div><strong>Inscrit le :</strong> ${u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</div>
+          <div><strong>Dernière activité :</strong> ${u.last_active_at ? new Date(u.last_active_at).toLocaleString() : 'Inconnue'}</div>
+          ${u.suspension_reason ? `<div style="grid-column: span 2; color: var(--warning);"><strong>Motif :</strong> ${escapeHtml(u.suspension_reason)}</div>` : ''}
+          ${u.suspended_until ? `<div style="grid-column: span 2; color: var(--warning);"><strong>Suspendu jusqu'au :</strong> ${new Date(u.suspended_until).toLocaleString()}</div>` : ''}
+        </div>
+
+        <div style="font-size: 13px; font-weight: 700; margin-top: 6px;">Actions sur le compte :</div>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          ${(isSusp || isBlk) ? `
+            <button class="btn btn-primary" onclick="unblockUser('${u.id}')">✅ Réactiver le compte</button>
+          ` : `
+            <button class="btn btn-warning" onclick="openSuspendModal('${u.id}')">⏸️ Suspendre temporairement...</button>
+            <button class="btn btn-danger" onclick="openBlockModal('${u.id}')">🚫 Bloquer définitivement...</button>
+          `}
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+          <span style="font-size: 13px; font-weight: 600;">Modifier la formule :</span>
+          <select class="form-select" style="width: auto;" onchange="changeUserTier('${u.id}', this.value)">
+            <option value="free" ${u.tier === 'free' ? 'selected' : ''}>Free</option>
+            <option value="premium" ${u.tier === 'premium' ? 'selected' : ''}>Premium</option>
+            <option value="vip" ${u.tier === 'vip' ? 'selected' : ''}>VIP</option>
+            <option value="black" ${u.tier === 'black' ? 'selected' : ''}>Black</option>
+          </select>
+        </div>
+      `;
+
+      document.getElementById('userModal').classList.remove('hidden');
+    }
+    function closeUserModal() { document.getElementById('userModal').classList.add('hidden'); }
+
+    // Suspend Modal
+    function openSuspendModal(userId) {
+      document.getElementById('suspendUserId').value = userId;
+      document.getElementById('suspendReason').value = '';
+      document.getElementById('suspendModal').classList.remove('hidden');
+    }
+    function closeSuspendModal() { document.getElementById('suspendModal').classList.add('hidden'); }
+    async function submitUserSuspension(e) {
+      e.preventDefault();
+      const uid = document.getElementById('suspendUserId').value;
+      const duration = parseInt(document.getElementById('suspendDuration').value, 10);
+      const reason = document.getElementById('suspendReason').value.trim();
+
+      const resp = await apiFetch(`/api/v1/admin/users/${uid}/suspend`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration_hours: duration > 0 ? duration : null, reason })
+      });
+      if (resp.ok) {
+        closeSuspendModal();
+        closeUserModal();
+        loadUsers();
+        loadStats();
+      } else {
+        alert("Erreur lors de la suspension");
+      }
+    }
+
+    // Block Modal
+    function openBlockModal(userId) {
+      document.getElementById('blockUserId').value = userId;
+      document.getElementById('blockReason').value = '';
+      document.getElementById('blockModal').classList.remove('hidden');
+    }
+    function closeBlockModal() { document.getElementById('blockModal').classList.add('hidden'); }
+    async function submitUserBlock(e) {
+      e.preventDefault();
+      const uid = document.getElementById('blockUserId').value;
+      const reason = document.getElementById('blockReason').value.trim();
+
+      const resp = await apiFetch(`/api/v1/admin/users/${uid}/block`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      if (resp.ok) {
+        closeBlockModal();
+        closeUserModal();
+        loadUsers();
+        loadStats();
+      } else {
+        alert("Erreur lors du blocage");
+      }
+    }
+
+    async function unblockUser(userId) {
+      const resp = await apiFetch(`/api/v1/admin/users/${userId}/unblock`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (resp.ok) {
+        closeUserModal();
+        loadUsers();
+        loadStats();
+      }
+    }
+
+    async function changeUserTier(userId, tier) {
+      const resp = await apiFetch(`/api/v1/admin/users/${userId}/tier`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier })
+      });
+      if (resp.ok) {
+        closeUserModal();
+        loadUsers();
+        loadStats();
+      }
+    }
+
+    // --- 3. Plans & Abonnements ---
+    async function loadPlans() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/gateway/plans', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (resp.ok) {
+          cachedPlans = await resp.json();
+          renderPlans(cachedPlans);
+        }
+        loadSubscriptions();
+      } catch (e) {}
+    }
+
+    function renderPlans(plans) {
+      const container = document.getElementById('plansCardsContainer');
+      container.innerHTML = plans.map(p => `
+        <div class="stat-card ${p.tier === 'premium' ? 'accent' : ''}">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span class="badge badge-${p.tier}">${p.tier}</span>
+            <button class="btn btn-sm" onclick="openPlanModal('${p.tier}')">✏️ Modifier</button>
+          </div>
+          <div style="font-size: 18px; font-weight: 800; color: var(--text-primary); margin-bottom: 8px;">${p.name || p.tier.toUpperCase()}</div>
+          <div style="font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px;">
+            <div><strong>Requêtes IA :</strong> ${p.ai_queries_daily || p.ai_queries_limit || 'Illimité'} / jour</div>
+            <div><strong>OCR :</strong> ${p.ocr_pages_limit || 0} pages</div>
+            <div><strong>Modèles :</strong> ${(p.allowed_models || []).join(', ') || 'Tous'}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openPlanModal(tier) {
+      const p = cachedPlans.find(x => x.tier === tier);
+      if (!p) return;
+      document.getElementById('editPlanId').value = tier;
+      document.getElementById('planEditTitle').textContent = `Modifier Plan : ${tier.toUpperCase()}`;
+      document.getElementById('editPlanQueries').value = p.ai_queries_daily || p.ai_queries_limit || 10;
+      document.getElementById('editPlanOcr').value = p.ocr_pages_limit || 0;
+      document.getElementById('editPlanPrice').value = p.price_monthly_cents || 0;
+      document.getElementById('planEditModal').classList.remove('hidden');
+    }
+    function closePlanModal() { document.getElementById('planEditModal').classList.add('hidden'); }
+    async function submitPlanUpdate(e) {
+      e.preventDefault();
+      const pid = document.getElementById('editPlanId').value;
+      const q = parseInt(document.getElementById('editPlanQueries').value, 10);
+      const ocr = parseInt(document.getElementById('editPlanOcr').value, 10);
+      const price = parseInt(document.getElementById('editPlanPrice').value, 10);
+
+      const resp = await apiFetch(`/api/v1/admin/gateway/plans/${pid}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_queries_limit: q, ocr_pages_limit: ocr, price_monthly_cents: price })
+      });
+      if (resp.ok) {
+        closePlanModal();
+        loadPlans();
+      } else {
+        alert("Erreur mise à jour plan");
+      }
+    }
+
+    async function loadSubscriptions() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/subscriptions', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const subs = await resp.json();
+        const tbody = document.getElementById('subscriptionsTableBody');
+        if (!subs.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun abonnement Stripe synchronisé pour le moment.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = subs.map(s => `
+          <tr>
+            <td>${escapeHtml(s.user_email || s.user_id)}</td>
+            <td><span class="badge badge-premium">${s.plan_id}</span></td>
+            <td><span class="badge badge-active">${s.status}</span></td>
+            <td><code style="font-size: 11px;">${s.stripe_customer_id || '-'}</code></td>
+            <td>${s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : '-'}</td>
+          </tr>
+        `).join('');
+      } catch (e) {}
+    }
+
+    // --- 4. SD AI Gateway ---
+    async function loadAiGateway() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/gateway/status', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        renderGatewayProviders(d.providers || []);
+
+        const mResp = await apiFetch('/api/v1/admin/gateway/models', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (mResp.ok) {
+          const models = await mResp.json();
+          renderGatewayModels(models);
+        }
+      } catch (e) {}
+    }
+
+    function renderGatewayProviders(providers) {
+      const container = document.getElementById('gatewayProvidersContainer');
+      container.innerHTML = providers.map(p => {
+        const isDis = p.manually_disabled;
+        const isUp = p.state === 'CLOSED' && !isDis;
+        return `
+          <div class="stat-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="font-weight: 800; font-size: 16px; color: var(--text-primary); text-transform: uppercase;">${p.name || p.provider}</div>
+              <span class="badge ${isUp ? 'badge-active' : 'badge-blocked'}">${isUp ? 'CONNECTÉ' : (isDis ? 'DÉSACTIVÉ' : p.state)}</span>
+            </div>
+            <div style="font-size: 12.5px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px;">
+              <div><strong>Modèle défaut :</strong> <code>${p.default_model || '-'}</code></div>
+              <div><strong>Circuit Breaker :</strong> ${p.state} (${p.failure_count || 0} erreurs)</div>
+              <div><strong>Statut identifiants :</strong> Côté serveur sécurisé (Zéro exposition frontend)</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm ${isDis ? 'btn-primary' : 'btn-danger'}" onclick="toggleProvider('${p.provider}', ${!isDis})">
+                ${isDis ? '▶️ Activer' : '⏸️ Désactiver'}
+              </button>
+              <button class="btn btn-sm" onclick="testProvider('${p.provider}')">🔍 Tester</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderGatewayModels(models) {
+      const tbody = document.getElementById('gatewayModelsTableBody');
+      tbody.innerHTML = models.map(m => `
+        <tr>
+          <td><strong>${escapeHtml(m.display_name || m.id)}</strong></td>
+          <td><span class="badge badge-free">${m.provider}</span></td>
+          <td style="font-size: 12px;">${m.is_multimodal ? 'Vision / Docs' : 'Texte'}</td>
+          <td style="font-size: 12px;">${m.context_window ? m.context_window.toLocaleString() + ' tokens' : '-'}</td>
+          <td><span class="badge ${m.is_available ? 'badge-active' : 'badge-suspended'}">${m.is_available ? 'Actif' : 'Indisponible'}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    async function toggleProvider(prov, disabled) {
+      await apiFetch(`/api/v1/admin/gateway/providers/${prov}/toggle?disabled=${disabled}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      loadAiGateway();
+    }
+    async function testProvider(prov) {
+      const resp = await apiFetch(`/api/v1/admin/gateway/providers/${prov}/test`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        alert(d.valid ? `✅ Fournisseur ${prov.toUpperCase()} opérationnel !` : `❌ Échec du test pour ${prov} : ${d.error || 'Identifiants invalides'}`);
+      }
+    }
+
+    // --- 5. Analytics IA ---
+    async function loadAnalytics() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/analytics?period=7d', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        renderAnalytics(d);
+      } catch (e) {}
+    }
+
+    function renderAnalytics(d) {
+      if (!window.Chart) return;
+      const ctxReq = document.getElementById('chart-requests-canvas')?.getContext('2d');
+      if (ctxReq) {
+        if (chartRequests) chartRequests.destroy();
+        chartRequests = new Chart(ctxReq, {
+          type: 'line',
+          data: {
+            labels: (d.time_series || []).map(x => x.period_label),
+            datasets: [{
+              label: 'Requêtes IA',
+              data: (d.time_series || []).map(x => x.requests),
+              borderColor: '#E5A93C',
+              backgroundColor: 'rgba(229, 169, 60, 0.1)',
+              fill: true, tension: 0.3
+            }]
+          },
+          options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+        });
+      }
+    }
+
+    // --- 6. Feedback Center ---
+    async function loadFeedback() {
+      const params = new URLSearchParams({ page: 1, limit: 50 });
+      if (currentFeedbackStatus) params.append('status', currentFeedbackStatus);
+
+      try {
+        const resp = await apiFetch(`/api/v1/admin/feedback?${params.toString()}`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        cachedFeedback = d.feedback || [];
+        renderFeedback(cachedFeedback);
+      } catch (e) {}
+    }
+
+    function renderFeedback(items) {
+      const tbody = document.getElementById('feedbackTableBody');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Aucun commentaire reçu.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(fb => {
+        let badge = `<span class="badge badge-pending">En attente</span>`;
+        if (fb.status === 'resolved') badge = `<span class="badge badge-resolved">Résolu</span>`;
+        else if (fb.status === 'in_progress') badge = `<span class="badge badge-vip">En cours</span>`;
+        else if (fb.status === 'closed') badge = `<span class="badge badge-free">Fermé</span>`;
+
+        return `
+          <tr>
+            <td style="font-size: 12px; color: var(--text-muted);">${new Date(fb.created_at).toLocaleDateString()}</td>
+            <td><strong>${escapeHtml(fb.email || fb.user_id || 'Anonyme')}</strong></td>
+            <td><span class="badge badge-free">${fb.category}</span></td>
+            <td>${escapeHtml(fb.subject)}</td>
+            <td>${badge}</td>
+            <td style="font-size: 12px; color: var(--text-secondary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${fb.admin_reply ? '✅ ' + escapeHtml(fb.admin_reply) : '—'}</td>
+            <td><button class="btn btn-sm" onclick="openFeedbackModal('${fb.id}')">Examiner & Répondre</button></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function setFeedbackStatusFilter(s, btn) {
+      currentFeedbackStatus = s;
+      btn.parentElement.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadFeedback();
+    }
+
+    function openFeedbackModal(fid) {
+      const fb = cachedFeedback.find(x => x.id === fid);
+      if (!fb) return;
+
+      document.getElementById('replyFeedbackId').value = fid;
+      document.getElementById('replyFeedbackContent').value = fb.admin_reply || '';
+      document.getElementById('updateFeedbackStatusSelect').value = fb.status || 'pending';
+
+      const dev = fb.device_info || {};
+      const devText = Object.keys(dev).length ? JSON.stringify(dev, null, 2) : 'Non renseigné';
+
+      document.getElementById('feedbackModalDetails').innerHTML = `
+        <div style="background: var(--canvas); padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle); font-size: 13px; display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Sujet :</strong> ${escapeHtml(fb.subject)}</div>
+          <div><strong>Catégorie :</strong> <span class="badge badge-free">${fb.category}</span></div>
+          <div><strong>Description :</strong><br><p style="margin-top: 4px; color: var(--text-secondary);">${escapeHtml(fb.description)}</p></div>
+          <div><strong>Diagnostic Appareil :</strong><pre style="background: var(--surface); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 4px;">${escapeHtml(devText)}</pre></div>
+          ${fb.screenshot_url ? `<div><strong>Capture d'écran :</strong><br><a href="${fb.screenshot_url}" target="_blank" style="color: var(--primary);">Voir l'image</a></div>` : ''}
+        </div>
+      `;
+
+      document.getElementById('feedbackModal').classList.remove('hidden');
+    }
+    function closeFeedbackModal() { document.getElementById('feedbackModal').classList.add('hidden'); }
+
+    async function submitFeedbackReplyForm(e) {
+      e.preventDefault();
+      const fid = document.getElementById('replyFeedbackId').value;
+      const reply = document.getElementById('replyFeedbackContent').value.trim();
+      const st = document.getElementById('updateFeedbackStatusSelect').value;
+
+      const resp = await apiFetch(`/api/v1/admin/feedback/${fid}/reply`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply })
+      });
+      if (resp.ok) {
+        if (st !== 'resolved') {
+          await apiFetch(`/api/v1/admin/feedback/${fid}/status`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: st })
+          });
+        }
+        closeFeedbackModal();
+        loadFeedback();
+        loadStats();
+      } else {
+        alert("Erreur envoi réponse");
+      }
+    }
+
+    // --- 7. Alertes Admin ---
+    async function loadAlerts() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/alerts', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        renderAlerts(d.alerts || []);
+      } catch (e) {}
+    }
+
+    function renderAlerts(alerts) {
+      const container = document.getElementById('alertsContainer');
+      if (!alerts.length) {
+        container.innerHTML = '<div class="panel" style="text-align: center; color: var(--success);">🟢 Aucune alerte active. Tous les systèmes sont nominaux.</div>';
+        return;
+      }
+
+      container.innerHTML = alerts.map(a => {
+        const isCrit = a.priority === 'critical';
+        const isWarn = a.priority === 'warning';
+        return `
+          <div class="panel" style="border-left: 4px solid ${isCrit ? 'var(--error)' : (isWarn ? 'var(--warning)' : 'var(--info)')};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${escapeHtml(a.title)}</div>
+              <span class="badge ${isCrit ? 'badge-blocked' : (isWarn ? 'badge-suspended' : 'badge-free')}">${a.priority}</span>
+            </div>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">${escapeHtml(a.message)}</p>
+            <div style="font-size: 11px; color: var(--text-muted);">${new Date(a.created_at).toLocaleString()}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- 8. Journal d'Audit & Erreurs ---
+    async function loadAuditLogs() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/logs/audit?limit=50', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (resp.ok) {
+          const logs = await resp.json();
+          const tbody = document.getElementById('auditTableBody');
+          tbody.innerHTML = logs.map(l => `
+            <tr>
+              <td style="font-size: 12px; color: var(--text-muted);">${new Date(l.created_at).toLocaleString()}</td>
+              <td><code style="font-size: 11px;">${l.admin_id?.substring(0, 8)}...</code></td>
+              <td><span class="badge badge-premium">${l.action}</span></td>
+              <td>${l.target_type || '-'} (${l.target_id?.substring(0, 8) || '-'})</td>
+              <td style="font-size: 12px;"><pre style="margin: 0; font-size: 11px;">${JSON.stringify(l.details || {})}</pre></td>
+            </tr>
+          `).join('');
+        }
+
+        const errResp = await apiFetch('/api/v1/admin/logs/errors?limit=30', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (errResp.ok) {
+          const errs = await errResp.json();
+          const tbody = document.getElementById('errorsTableBody');
+          tbody.innerHTML = errs.map(e => `
+            <tr>
+              <td style="font-size: 12px; color: var(--text-muted);">${new Date(e.created_at).toLocaleString()}</td>
+              <td><span class="badge badge-free">${e.source}</span></td>
+              <td style="color: var(--error); font-weight: 600;">${e.error_type}</td>
+              <td style="font-size: 12px;">${escapeHtml(e.message)}</td>
+              <td><code style="font-size: 11px;">${e.user_id ? e.user_id.substring(0, 8) + '...' : '-'}</code></td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {}
+    }
+
+    // --- 9. Paramètres Système ---
+    async function loadSystemSettings() {
+      try {
+        const resp = await apiFetch('/api/v1/admin/settings', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        const s = d.settings || {};
+
+        if (s.maintenance_mode) {
+          document.getElementById('setting_maintenance_toggle').checked = !!s.maintenance_mode.value?.enabled;
+          document.getElementById('setting_maintenance_msg').value = s.maintenance_mode.value?.message || '';
+        }
+        if (s.registrations_open) {
+          document.getElementById('setting_registrations_toggle').checked = !!s.registrations_open.value?.enabled;
+        }
+        if (s.min_app_version) {
+          document.getElementById('setting_min_version').value = s.min_app_version.value?.version || '1.0.0';
+          document.getElementById('setting_force_update').checked = !!s.min_app_version.value?.force_update;
+        }
+        if (s.global_announcement) {
+          document.getElementById('setting_announcement_toggle').checked = !!s.global_announcement.value?.enabled;
+          document.getElementById('setting_announcement_title').value = s.global_announcement.value?.title || '';
+          document.getElementById('setting_announcement_msg').value = s.global_announcement.value?.message || '';
+        }
+      } catch (e) {}
+    }
+
+    async function saveAllSettings(e) {
+      e.preventDefault();
+      const maintEnabled = document.getElementById('setting_maintenance_toggle').checked;
+      const maintMsg = document.getElementById('setting_maintenance_msg').value;
+
+      if (maintEnabled && !confirm("⚠️ ATTENTION : Activer le mode maintenance empêchera les utilisateurs d'accéder à l'application. Confirmer ?")) {
+        return;
+      }
+
+      await apiFetch('/api/v1/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'maintenance_mode', value: { enabled: maintEnabled, message: maintMsg } })
+      });
+
+      await apiFetch('/api/v1/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'registrations_open', value: { enabled: document.getElementById('setting_registrations_toggle').checked } })
+      });
+
+      await apiFetch('/api/v1/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'min_app_version',
+          value: {
+            version: document.getElementById('setting_min_version').value.trim(),
+            force_update: document.getElementById('setting_force_update').checked
+          }
+        })
+      });
+
+      await apiFetch('/api/v1/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'global_announcement',
+          value: {
+            enabled: document.getElementById('setting_announcement_toggle').checked,
+            title: document.getElementById('setting_announcement_title').value.trim(),
+            message: document.getElementById('setting_announcement_msg').value.trim()
+          }
+        })
+      });
+
+      alert("✅ Paramètres système enregistrés avec succès !");
+      loadSystemSettings();
+      loadAlerts();
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

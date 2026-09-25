@@ -30,6 +30,13 @@ mobile/android/.gradle/
 !*.env.example
 !*.env.development.example
 !*.env.production.example
+*.jks
+*.keystore
+key.properties
+
+# Firebase
+firebase-debug.log
+.firebase/
 
 # OS files
 .DS_Store

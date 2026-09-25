@@ -26,9 +26,14 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = Field(default="")
     supabase_jwt_secret: str = Field(default="super-secret-jwt-token-sd-dev-2026")
 
-    # Moteur IA (Google Gemini V1)
+    # Moteurs IA (SD AI Gateway)
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-3.6-flash")
+    openai_api_key: str = Field(default="")
+    anthropic_api_key: str = Field(default="")
+    xai_api_key: str = Field(default="")
+    openrouter_api_key: str = Field(default="")
+    deepseek_api_key: str = Field(default="")
 
     # Monétisation & Billing Stripe
     stripe_secret_key: str = Field(default="")

@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 
+from app.core.config import settings
 from app.core.security import get_current_user, AuthenticatedUser
 from app.schemas.chat_schemas import (
     ConversationResponse,
@@ -38,7 +39,7 @@ async def create_conversation(
     created = ChatRepository.create_conversation(
         user_id=current_user.id,
         title=payload.title or "Nouvelle conversation",
-        model=payload.model or "gemini-3.6-flash",
+        model=payload.model or settings.gemini_model or "gemini-3.6-flash",
         system_prompt=payload.system_prompt
     )
     return ConversationResponse(**created)

@@ -1,7 +1,10 @@
 class UserQuota {
   final String userId;
   final String plan;
+  final String planName;
   final bool isPremium;
+  final bool canSelectModel;
+  final List<String> allowedModels;
   final int messagesLimit;
   final int messagesUsed;
   final int messagesRemaining;
@@ -13,8 +16,11 @@ class UserQuota {
 
   const UserQuota({
     required this.userId,
-    required this.plan,
+    this.plan = 'free',
+    this.planName = 'SD FREE',
     required this.isPremium,
+    this.canSelectModel = false,
+    this.allowedModels = const [],
     required this.messagesLimit,
     required this.messagesUsed,
     required this.messagesRemaining,
@@ -25,14 +31,29 @@ class UserQuota {
     required this.resetAt,
   });
 
+  bool get isVip => plan.toLowerCase() == 'vip';
+  bool get isBlack => plan.toLowerCase() == 'black';
+  bool get isPaidPlan => isPremium || isVip || isBlack;
+
   factory UserQuota.fromJson(Map<String, dynamic> json) {
+    final p = (json['plan'] as String? ?? 'free').toLowerCase();
+    final isPrem = json['is_premium'] as bool? ?? (p != 'free');
+    final canSelect = json['can_select_model'] as bool? ?? (p == 'vip' || p == 'black');
+    final modelsList = (json['allowed_models'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        <String>[];
+
     return UserQuota(
       userId: json['user_id'] as String? ?? '',
-      plan: json['plan'] as String? ?? 'free',
-      isPremium: json['is_premium'] as bool? ?? false,
-      messagesLimit: (json['messages_limit'] as num?)?.toInt() ?? 20,
+      plan: p,
+      planName: json['plan_name'] as String? ?? _defaultPlanName(p),
+      isPremium: isPrem,
+      canSelectModel: canSelect,
+      allowedModels: modelsList,
+      messagesLimit: (json['messages_limit'] as num?)?.toInt() ?? 5,
       messagesUsed: (json['messages_used'] as num?)?.toInt() ?? 0,
-      messagesRemaining: (json['messages_remaining'] as num?)?.toInt() ?? 20,
+      messagesRemaining: (json['messages_remaining'] as num?)?.toInt() ?? 5,
       attachmentsLimit: (json['attachments_limit'] as num?)?.toInt() ?? 3,
       attachmentsUsed: (json['attachments_used'] as num?)?.toInt() ?? 0,
       attachmentsRemaining: (json['attachments_remaining'] as num?)?.toInt() ?? 3,
@@ -42,6 +63,20 @@ class UserQuota {
               DateTime.now().add(const Duration(days: 1))
           : DateTime.now().add(const Duration(days: 1)),
     );
+  }
+
+  static String _defaultPlanName(String plan) {
+    switch (plan.toLowerCase()) {
+      case 'black':
+        return 'SD BLACK PREMIUM ULTRA';
+      case 'vip':
+        return 'SD VIP';
+      case 'premium':
+        return 'SD PREMIUM';
+      case 'free':
+      default:
+        return 'SD FREE';
+    }
   }
 
   /// Format de réinitialisation lisible en français

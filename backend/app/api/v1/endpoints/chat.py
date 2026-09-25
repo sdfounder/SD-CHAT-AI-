@@ -28,8 +28,21 @@ async def stream_chat_message(
     2. Reçoit le message de l'utilisateur, déclenche l'IA (Gemini V1) et renvoie
        les morceaux de texte en flux continu (Server-Sent Events).
     """
-    # Contrôle strict du quota utilisateur avant d'initier la réponse IA
-    QuotaService.check_and_consume_message_quota(current_user.id)
+    # Contrôle du quota : nouveau message = consommation, régénération/édition = pas de double décompte
+    if not request.edit_message_id:
+        QuotaService.check_and_consume_message_quota(current_user.id)
+    else:
+        status_info = QuotaService.get_quota_status(current_user.id)
+        if status_info.is_quota_exceeded:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error_code": "QUOTA_EXCEEDED",
+                    "message": "Quota journalier atteint.",
+                    "plan": status_info.plan,
+                    "reset_at": status_info.reset_at.isoformat(),
+                }
+            )
 
     return StreamingResponse(
         ChatService.stream_chat(current_user, request),

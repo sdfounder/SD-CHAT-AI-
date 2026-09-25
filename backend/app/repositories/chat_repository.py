@@ -8,24 +8,42 @@ logger = logging.getLogger(__name__)
 class ChatRepository:
     """Accès aux données et persistance pour le domaine conversationnel SD CHAT AI."""
 
+    _verified_profiles = set()
+
     @staticmethod
-    def ensure_user_profile(user_id: str, email: Optional[str] = None, full_name: Optional[str] = None):
+    def ensure_user_profile(user_id: str, email: Optional[str] = None, full_name: Optional[str] = None, tier: Optional[str] = "free"):
         """Assure que le profil utilisateur existe dans public.profiles afin de respecter les contraintes FK."""
+        if user_id in ChatRepository._verified_profiles:
+            return
+
         with db_manager.connect() as conn:
             email_val = email or f"user_{user_id[:8]}@sd-chat.ai"
             name_val = full_name or "Utilisateur SD"
+            tier_val = tier or "free"
+
+            # Règle premier utilisateur : Si aucun administrateur n'existe encore en base, le premier devient SUPER ADMIN
+            admin_rows = conn.run("SELECT count(*) FROM public.profiles WHERE role = 'admin'")
+            admin_count = admin_rows[0][0] if admin_rows else 0
+            assigned_role = "admin" if admin_count == 0 else "user"
+            assigned_tier = "premium" if assigned_role == "admin" else tier_val
+
             conn.run(
                 """
-                INSERT INTO public.profiles (id, email, full_name, role, tier, preferences, created_at, updated_at)
-                VALUES (:uid, :email, :name, 'user', 'free', '{}'::jsonb, NOW(), NOW())
+                INSERT INTO public.profiles (id, email, full_name, role, tier, status, last_active_at, preferences, created_at, updated_at)
+                VALUES (:uid, :email, :name, :role, :tier, 'active', NOW(), CAST('{}' AS jsonb), NOW(), NOW())
                 ON CONFLICT (id) DO UPDATE SET
                     email = COALESCE(EXCLUDED.email, public.profiles.email),
+                    tier = COALESCE(EXCLUDED.tier, public.profiles.tier),
+                    last_active_at = NOW(),
                     updated_at = NOW()
                 """,
                 uid=user_id,
                 email=email_val,
-                name=name_val
+                name=name_val,
+                role=assigned_role,
+                tier=assigned_tier
             )
+        ChatRepository._verified_profiles.add(user_id)
 
     @staticmethod
     def create_conversation(
@@ -71,7 +89,6 @@ class ChatRepository:
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Récupère l'historique des conversations d'un utilisateur avec compteurs et aperçus."""
-        ChatRepository.ensure_user_profile(user_id)
         with db_manager.connect() as conn:
             archived_filter = "" if include_archived else "AND c.is_archived = FALSE"
             sql = f"""

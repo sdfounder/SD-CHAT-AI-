@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/sd_chat_colors.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/chat_api_service.dart';
+import '../../../core/services/sync_service.dart';
 import '../../../shared/models/conversation.dart';
 import '../../../shared/models/user_quota.dart';
 import '../../chat/widgets/quota_dialog.dart';
+import '../../premium/screens/premium_screen.dart';
+import '../../settings/screens/settings_screen.dart';
 
 class ConversationsDrawer extends StatefulWidget {
   final String? activeConversationId;
@@ -31,6 +35,8 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
   List<Conversation> _allConversations = [];
   UserQuota? _userQuota;
   bool _isLoading = true;
+  bool _hasError = false;
+  String? _errorMessage;
   bool _showArchived = false;
 
   @override
@@ -40,18 +46,45 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
   }
 
   Future<void> _loadConversations() async {
-    setState(() => _isLoading = true);
-    final results = await Future.wait([
-      _chatApi.fetchConversations(includeArchived: true),
-      _chatApi.fetchUserQuota(),
-    ]);
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = null;
+    });
 
-    if (mounted) {
-      setState(() {
-        _allConversations = results[0] as List<Conversation>;
-        _userQuota = results[1] as UserQuota?;
-        _isLoading = false;
-      });
+    try {
+      final results = await Future.wait([
+        _chatApi.fetchConversations(includeArchived: true),
+        _chatApi.fetchUserQuota(),
+      ]);
+
+      if (mounted) {
+        final convs = results[0] as List<Conversation>;
+        final quota = results[1] as UserQuota?;
+        final failed = _chatApi.lastFetchHadError && convs.isEmpty;
+
+        setState(() {
+          _allConversations = convs;
+          _userQuota = quota;
+          _isLoading = false;
+          _hasError = failed;
+          if (failed) {
+            _errorMessage = SyncService.instance.isOffline
+                ? 'Mode hors ligne : aucune discussion locale enregistrée.'
+                : 'Connexion au serveur impossible.';
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = _allConversations.isEmpty;
+          _errorMessage = SyncService.instance.isOffline
+              ? 'Mode hors ligne (données locales)'
+              : 'Erreur réseau temporaire.';
+        });
+      }
     }
   }
 
@@ -199,31 +232,40 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
               child: InkWell(
                 onTap: () {
+                  HapticFeedback.lightImpact();
                   Navigator.pop(context);
                   widget.onNewChat();
                 },
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                   decoration: BoxDecoration(
-                    color: SDChatColors.surface,
-                    borderRadius: BorderRadius.circular(12),
+                    color: SDChatColors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: SDChatColors.primary.withValues(alpha: 0.4),
-                      width: 1,
+                      color: SDChatColors.primary.withValues(alpha: 0.55),
+                      width: 1.2,
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: SDChatColors.primary.withValues(alpha: 0.12),
+                        blurRadius: 14,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_rounded, color: SDChatColors.primary, size: 20),
+                      Icon(Icons.add_rounded, color: SDChatColors.primary, size: 21),
                       SizedBox(width: 8),
                       Text(
                         'Nouveau chat',
                         style: TextStyle(
                           color: SDChatColors.primary,
                           fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
                         ),
                       ),
                     ],
@@ -232,16 +274,87 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
               ),
             ),
 
+            // Indicateur de synchronisation discret & premium
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              child: AnimatedBuilder(
+                animation: SyncService.instance,
+                builder: (context, _) {
+                  final sync = SyncService.instance;
+                  final isSyncing = sync.status == SyncState.syncing;
+
+                  Color dotColor;
+                  switch (sync.status) {
+                    case SyncState.synced:
+                      dotColor = SDChatColors.online;
+                      break;
+                    case SyncState.syncing:
+                      dotColor = SDChatColors.primary;
+                      break;
+                    case SyncState.serverUnavailable:
+                      dotColor = SDChatColors.warning;
+                      break;
+                    case SyncState.offline:
+                    case SyncState.error:
+                      dotColor = SDChatColors.error;
+                      break;
+                  }
+
+                  return Row(
+                    children: [
+                      Container(
+                        width: 6.5,
+                        height: 6.5,
+                        decoration: BoxDecoration(
+                          color: dotColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          sync.statusLabel,
+                          style: TextStyle(
+                            color: (sync.isServerUnavailable || sync.isOffline) ? dotColor : SDChatColors.textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (!isSyncing)
+                        InkWell(
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            sync.syncAll(force: true);
+                            _loadConversations();
+                          },
+                          child: const Icon(
+                            Icons.sync_rounded,
+                            size: 14,
+                            color: SDChatColors.textMuted,
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+
             // Sélecteur Onglets : Discussions Actives / Archives
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 4.0),
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
               child: Row(
                 children: [
                   Expanded(
                     child: _buildFilterChip(
                       label: 'Actives ($activeCount)',
                       isSelected: !_showArchived,
-                      onTap: () => setState(() => _showArchived = false),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _showArchived = false);
+                      },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -249,7 +362,10 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                     child: _buildFilterChip(
                       label: 'Archives ($archivedCount)',
                       isSelected: _showArchived,
-                      onTap: () => setState(() => _showArchived = true),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _showArchived = true);
+                      },
                     ),
                   ),
                 ],
@@ -267,18 +383,68 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                         color: SDChatColors.primary,
                       ),
                     )
-                  : displayedList.isEmpty
+                  : _hasError && _allConversations.isEmpty
                       ? Center(
-                          child: Text(
-                            _showArchived
-                                ? 'Aucune discussion archivée'
-                                : 'Aucune discussion enregistrée',
-                            style: const TextStyle(
-                              color: SDChatColors.textMuted,
-                              fontSize: 13,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.cloud_off_rounded,
+                                  size: 36,
+                                  color: SDChatColors.error,
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  _errorMessage ?? 'Erreur de synchronisation',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: SDChatColors.textMuted,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: SDChatColors.primary,
+                                    foregroundColor: SDChatColors.background,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  ),
+                                  onPressed: _loadConversations,
+                                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                                  label: const Text('Réessayer', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
                             ),
                           ),
                         )
+                      : displayedList.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _showArchived ? Icons.archive_outlined : Icons.chat_bubble_outline_rounded,
+                                    size: 32,
+                                    color: SDChatColors.borderHighlight,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _showArchived
+                                        ? 'Aucune discussion archivée'
+                                        : 'Aucune discussion pour l\'instant',
+                                    style: const TextStyle(
+                                      color: SDChatColors.textMuted,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
                       : RefreshIndicator(
                           color: SDChatColors.primary,
                           backgroundColor: SDChatColors.surface,
@@ -291,17 +457,25 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                               final isActive = conv.id == widget.activeConversationId;
 
                               return Container(
-                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                margin: const EdgeInsets.symmetric(vertical: 2.5),
                                 decoration: BoxDecoration(
-                                  color: isActive
-                                      ? SDChatColors.surfaceElevated
-                                      : Colors.transparent,
+                                  gradient: isActive
+                                      ? LinearGradient(
+                                          colors: [
+                                            SDChatColors.primary.withValues(alpha: 0.14),
+                                            SDChatColors.surfaceElevated,
+                                          ],
+                                          begin: Alignment.centerLeft,
+                                          end: Alignment.centerRight,
+                                        )
+                                      : null,
+                                  color: isActive ? null : Colors.transparent,
                                   borderRadius: BorderRadius.circular(10),
                                   border: isActive
                                       ? const Border(
                                           left: BorderSide(
                                             color: SDChatColors.primary,
-                                            width: 3,
+                                            width: 3.5,
                                           ),
                                         )
                                       : null,
@@ -480,58 +654,144 @@ class _ConversationsDrawerState extends State<ConversationsDrawer> {
                 ),
               ),
 
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 4.0),
+              child: ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                tileColor: SDChatColors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: SDChatColors.borderSubtle, width: 0.8),
+                ),
+                leading: const Icon(Icons.workspace_premium_rounded, color: SDChatColors.primary, size: 20),
+                title: Text(
+                  _userQuota?.isPremium == true ? 'Gérer mon abonnement' : 'Passer à Premium (19,99 €)',
+                  style: const TextStyle(
+                    color: SDChatColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: SDChatColors.textMuted),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const PremiumScreen()),
+                  ).then((_) => _loadConversations());
+                },
+              ),
+            ),
+
+            // Entrée Officielle : ⚙️ Paramètres
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 2.0),
+              child: ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                tileColor: SDChatColors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: SDChatColors.borderSubtle, width: 0.8),
+                ),
+                leading: const Icon(Icons.settings_outlined, color: SDChatColors.primary, size: 20),
+                title: const Text(
+                  'Paramètres',
+                  style: TextStyle(
+                    color: SDChatColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: SDChatColors.textMuted),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  ).then((_) => _loadConversations());
+                },
+              ),
+            ),
             const Divider(color: SDChatColors.borderSubtle, height: 1),
 
-            // Pied de page Utilisateur & Déconnexion
+            // Pied de page Utilisateur cliquable -> Paramètres
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: SDChatColors.surfaceHighlight,
-                    backgroundImage: _auth.currentAvatarUrl != null
-                        ? NetworkImage(_auth.currentAvatarUrl!)
-                        : null,
-                    child: _auth.currentAvatarUrl == null
-                        ? const Icon(Icons.person_rounded, size: 18, color: SDChatColors.primary)
-                        : null,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _auth.currentUserName ?? 'Utilisateur SD',
-                          style: const TextStyle(
-                            color: SDChatColors.textPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+              padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  ).then((_) => _loadConversations());
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: SDChatColors.surfaceHighlight,
+                        backgroundImage: _auth.currentAvatarUrl != null
+                            ? NetworkImage(_auth.currentAvatarUrl!)
+                            : null,
+                        child: _auth.currentAvatarUrl == null
+                            ? const Icon(Icons.person_rounded, size: 18, color: SDChatColors.primary)
+                            : null,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _auth.currentUserName ?? 'Utilisateur SD',
+                              style: const TextStyle(
+                                color: SDChatColors.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              _auth.currentUserEmail ?? '',
+                              style: const TextStyle(
+                                color: SDChatColors.textMuted,
+                                fontSize: 11,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
-                        Text(
-                          _auth.currentUserEmail ?? '',
-                          style: const TextStyle(
-                            color: SDChatColors.textMuted,
-                            fontSize: 11,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.logout_rounded, size: 18),
+                        color: SDChatColors.textMuted,
+                        tooltip: 'Déconnexion',
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          _auth.signOut();
+                        },
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.logout_rounded, size: 18),
-                    color: SDChatColors.textMuted,
-                    tooltip: 'Déconnexion',
-                    onPressed: () => _auth.signOut(),
-                  ),
-                ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8, top: 2),
+              child: Text(
+                'SD — Build the Future with AI • Sekou Diaby',
+                style: TextStyle(
+                  color: SDChatColors.textDisabled,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.2,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -150,93 +151,153 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
   }
 
-  /// Ouvre le menu modal pour choisir Image ou Fichier texte
+  /// Ouvre le menu modal pour choisir Image, Photo ou Fichier texte
   void _showAttachmentOptions() {
     if (widget.isStreaming) return;
+    HapticFeedback.lightImpact();
 
     showModalBottomSheet(
       context: context,
       backgroundColor: SDChatColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: SDChatColors.borderMedium,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Ajouter une pièce jointe',
-                    style: TextStyle(
-                      color: SDChatColors.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 18),
                     decoration: BoxDecoration(
-                      color: SDChatColors.surfaceHighlight,
-                      borderRadius: BorderRadius.circular(10),
+                      color: SDChatColors.borderMedium,
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    child: const Icon(Icons.image_rounded, color: SDChatColors.primary),
                   ),
-                  title: const Text(
-                    'Image depuis la Galerie',
-                    style: TextStyle(color: SDChatColors.textPrimary, fontWeight: FontWeight.w500),
+                ),
+                const Text(
+                  'Ajouter une pièce jointe',
+                  style: TextStyle(
+                    color: SDChatColors.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
                   ),
-                  subtitle: const Text(
-                    'JPEG, PNG, WebP (max 10 Mo)',
-                    style: TextStyle(color: SDChatColors.textMuted, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Images, captures ou documents (max 10 Mo)',
+                  style: TextStyle(
+                    color: SDChatColors.textMuted,
+                    fontSize: 12.5,
                   ),
+                ),
+                const SizedBox(height: 18),
+                _buildAttachmentOptionTile(
+                  icon: Icons.photo_library_rounded,
+                  title: 'Galerie Photos',
+                  subtitle: 'JPEG, PNG, WebP',
                   onTap: () {
                     Navigator.pop(ctx);
                     _pickImage(ImageSource.gallery);
                   },
                 ),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: SDChatColors.surfaceHighlight,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.description_rounded, color: SDChatColors.primary),
-                  ),
-                  title: const Text(
-                    'Fichier texte (.txt, .md, .csv)',
-                    style: TextStyle(color: SDChatColors.textPrimary, fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: const Text(
-                    'Documents et données textuelles (max 10 Mo)',
-                    style: TextStyle(color: SDChatColors.textMuted, fontSize: 12),
-                  ),
+                const SizedBox(height: 10),
+                _buildAttachmentOptionTile(
+                  icon: Icons.camera_alt_rounded,
+                  title: 'Prendre une Photo',
+                  subtitle: 'Capture instantanée par l\'appareil',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImage(ImageSource.camera);
+                  },
+                ),
+                const SizedBox(height: 10),
+                _buildAttachmentOptionTile(
+                  icon: Icons.description_rounded,
+                  title: 'Document texte ou code',
+                  subtitle: '.txt, .md, .csv, .json, .dart, .py',
                   onTap: () {
                     Navigator.pop(ctx);
                     _pickTextFile();
                   },
                 ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildAttachmentOptionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: SDChatColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: SDChatColors.borderSubtle, width: 0.8),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: SDChatColors.surfaceHighlight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: SDChatColors.primary, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: SDChatColors.textPrimary,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: SDChatColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 13,
+              color: SDChatColors.textMuted,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -388,6 +449,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
 
   /// Suppression d'une pièce jointe avant l'envoi
   Future<void> _removeAttachment(ChatAttachment att) async {
+    HapticFeedback.selectionClick();
     setState(() {
       _pendingAttachments.remove(att);
     });
@@ -614,7 +676,10 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                               color: SDChatColors.textSecondary,
                             ),
                       tooltip: isListening ? 'Arrêter la dictée' : 'Activer la dictée vocale',
-                      onPressed: _toggleDictation,
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        _toggleDictation();
+                      },
                     ),
                   ),
 
@@ -625,12 +690,12 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                     child: widget.isStreaming
                         ? IconButton(
                             icon: Container(
-                              width: 28,
-                              height: 28,
+                              width: 32,
+                              height: 32,
                               decoration: BoxDecoration(
                                 color: SDChatColors.surfaceHighlight,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: SDChatColors.primary),
+                                border: Border.all(color: SDChatColors.primary, width: 1.2),
                               ),
                               child: const Center(
                                 child: Icon(
@@ -640,29 +705,48 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                                 ),
                               ),
                             ),
-                            onPressed: widget.onStop,
+                            tooltip: 'Arrêter la génération',
+                            onPressed: () {
+                              HapticFeedback.lightImpact();
+                              widget.onStop?.call();
+                            },
                           )
                         : IconButton(
                             icon: Container(
-                              width: 32,
-                              height: 32,
+                              width: 34,
+                              height: 34,
                               decoration: BoxDecoration(
                                 color: canSend
                                     ? SDChatColors.primary
                                     : SDChatColors.surfaceHighlight,
                                 shape: BoxShape.circle,
+                                boxShadow: canSend
+                                    ? [
+                                        BoxShadow(
+                                          color: SDChatColors.primary.withValues(alpha: 0.35),
+                                          blurRadius: 10,
+                                          spreadRadius: 1,
+                                        ),
+                                      ]
+                                    : null,
                               ),
                               child: Center(
                                 child: Icon(
                                   Icons.arrow_upward_rounded,
-                                  size: 18,
+                                  size: 19,
                                   color: canSend
                                       ? SDChatColors.background
                                       : SDChatColors.textDisabled,
                                 ),
                               ),
                             ),
-                            onPressed: canSend ? _handleSend : null,
+                            tooltip: 'Envoyer',
+                            onPressed: canSend
+                                ? () {
+                                    HapticFeedback.lightImpact();
+                                    _handleSend();
+                                  }
+                                : null,
                           ),
                   ),
                 ],
