@@ -36,12 +36,6 @@ class DatabaseConnectionManager:
         self._refresh_config()
         target_host = self._host
 
-        # Forcer la résolution IPv4 explicite pour éliminer tout blocage IPv6 (Errno 93 / timeout 60s)
-        try:
-            target_host = socket.gethostbyname(self._host)
-        except Exception as dns_err:
-            logger.debug("Résolution DNS IPv4 fallback sur hostname: %s", dns_err)
-
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE

@@ -285,6 +285,11 @@
         <span id="backendEnv">Production (Render HTTPS)</span>
       </div>
 
+      <div id="realtimeStatusBadge" style="display: flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 8px; border-radius: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #10B981;">
+        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10B981;"></span>
+        <span id="realtimeStatusText">⚡ Realtime Actif</span>
+      </div>
+
       <div style="display: flex; align-items: center; gap: 6px;">
         <span style="font-size: 11.5px; color: var(--text-muted);">Rafraîchissement:</span>
         <select id="autoRefreshSelect" class="form-input" style="width: auto; padding: 4px 8px; font-size: 12px;" onchange="updateAutoRefresh(this.value)">
@@ -1179,6 +1184,62 @@
       }
     }
 
+    // Supabase Realtime Configuration
+    const SUPABASE_URL = 'https://ryvmacsmfvllhgbqbnkb.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5dm1hY3NtZnZsbGhnYnFibnFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMzM2MjAsImV4cCI6MjA5OTYwOTYyMH0.placeholder';
+    let supabaseClient = null;
+    let realtimeChannel = null;
+
+    function initRealtime() {
+      if (realtimeChannel || !window.supabase) return;
+      try {
+        if (!supabaseClient) {
+          supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
+        realtimeChannel = supabaseClient.channel('admin-live-feed')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
+            console.log('[Realtime] Profile change:', payload);
+            loadStats();
+            const active = document.querySelector('main > section:not(.hidden)');
+            if (active && active.id === 'tab-users') loadUsers();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subscriptions' }, (payload) => {
+            console.log('[Realtime] Subscription change:', payload);
+            loadStats();
+            const active = document.querySelector('main > section:not(.hidden)');
+            if (active && active.id === 'tab-plans') loadSubscriptions();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'user_feedback' }, (payload) => {
+            console.log('[Realtime] User feedback change:', payload);
+            loadStats();
+            const active = document.querySelector('main > section:not(.hidden)');
+            if (active && active.id === 'tab-feedback') loadFeedback();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_conversations' }, (payload) => {
+            console.log('[Realtime] Conversation change:', payload);
+            loadStats();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload) => {
+            console.log('[Realtime] System settings change:', payload);
+            loadSystemSettings();
+          })
+          .subscribe((status) => {
+            console.log('[Supabase Realtime Status]:', status);
+            const textEl = document.getElementById('realtimeStatusText');
+            const badgeEl = document.getElementById('realtimeStatusBadge');
+            if (status === 'SUBSCRIBED') {
+              if (textEl) textEl.textContent = '⚡ Realtime Connecté';
+              if (badgeEl) badgeEl.style.color = '#10B981';
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              if (textEl) textEl.textContent = '⚡ Polling 10s Actif';
+              if (badgeEl) badgeEl.style.color = 'var(--text-muted)';
+            }
+          });
+      } catch (err) {
+        console.warn('Realtime subscription error:', err);
+      }
+    }
+
     async function verifyAdminSession() {
       try {
         const resp = await apiFetch('/api/v1/admin/auth/me', {
@@ -1188,6 +1249,7 @@
         const admin = await resp.json();
         document.getElementById('adminProfileEmail').textContent = admin.email;
         if (admin.full_name) document.getElementById('adminProfileName').textContent = admin.full_name;
+        initRealtime();
         loadAllData();
       } catch (e) {
         handleLogout();
@@ -1195,6 +1257,12 @@
     }
 
     function handleLogout() {
+      if (realtimeChannel && supabaseClient) {
+        try {
+          supabaseClient.removeChannel(realtimeChannel);
+        } catch (_) {}
+        realtimeChannel = null;
+      }
       localStorage.removeItem('sd_admin_token');
       authToken = '';
       checkAdminInitStatus().then(() => {

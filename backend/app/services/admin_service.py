@@ -501,90 +501,52 @@ class AdminService:
 
     @staticmethod
     def get_stats() -> AdminStatsResponse:
-        """Calcule les statistiques consolidées réelles de SD CHAT AI."""
+        """Calcule les statistiques consolidées réelles de SD CHAT AI en une seule requête directe."""
         with db_manager.connect() as conn:
-            # 1. Nombre total d'utilisateurs et répartition détaillée
-            rows_users = conn.run(
-                """
-                SELECT
-                    COUNT(*),
-                    COUNT(*) FILTER (WHERE tier = 'free' OR tier IS NULL),
-                    COUNT(*) FILTER (WHERE tier IN ('premium', 'pro')),
-                    COUNT(*) FILTER (WHERE tier = 'vip'),
-                    COUNT(*) FILTER (WHERE tier = 'black'),
-                    COUNT(*) FILTER (WHERE status = 'suspended' OR (is_suspended = true AND (status != 'blocked' OR status IS NULL))),
-                    COUNT(*) FILTER (WHERE status = 'blocked'),
-                    COUNT(*) FILTER (WHERE last_active_at >= NOW() - INTERVAL '5 minutes')
-                FROM public.profiles
-                """
-            )
-            total_users = int(rows_users[0][0]) if rows_users else 0
-            free_users = int(rows_users[0][1]) if rows_users else 0
-            premium_users = int(rows_users[0][2]) if rows_users else 0
-            vip_users = int(rows_users[0][3]) if rows_users else 0
-            black_users = int(rows_users[0][4]) if rows_users else 0
-            suspended_users = int(rows_users[0][5]) if rows_users else 0
-            blocked_users = int(rows_users[0][6]) if rows_users else 0
-            online_users = int(rows_users[0][7]) if rows_users else 0
+            query = """
+            SELECT
+                (SELECT COUNT(*) FROM public.profiles),
+                (SELECT COUNT(*) FROM public.profiles WHERE tier = 'free' OR tier IS NULL),
+                (SELECT COUNT(*) FROM public.profiles WHERE tier IN ('premium', 'pro')),
+                (SELECT COUNT(*) FROM public.profiles WHERE tier = 'vip'),
+                (SELECT COUNT(*) FROM public.profiles WHERE tier = 'black'),
+                (SELECT COUNT(*) FROM public.profiles WHERE status = 'suspended' OR (is_suspended = true AND (status != 'blocked' OR status IS NULL))),
+                (SELECT COUNT(*) FROM public.profiles WHERE status = 'blocked'),
+                (SELECT COUNT(*) FROM public.profiles WHERE last_active_at >= NOW() - INTERVAL '5 minutes'),
+                (SELECT COUNT(DISTINCT user_id) FROM public.chat_messages WHERE created_at >= NOW() - INTERVAL '24 hours'),
+                (SELECT COUNT(DISTINCT user_id) FROM public.chat_messages WHERE created_at >= NOW() - INTERVAL '7 days'),
+                (SELECT COUNT(*) FROM public.chat_conversations),
+                (SELECT COUNT(*) FROM public.chat_messages),
+                (SELECT COUNT(*) FROM public.chat_attachments),
+                (SELECT COALESCE(SUM(tokens_used), 0) FROM public.chat_user_usage WHERE period_start = CURRENT_DATE),
+                (SELECT COALESCE(SUM(messages_sent), 0) FROM public.chat_user_usage WHERE period_start = CURRENT_DATE),
+                (SELECT COUNT(*) FROM public.subscriptions WHERE status = 'active' AND plan_id NOT IN ('free', 'default') AND stripe_subscription_id IS NOT NULL AND stripe_subscription_id NOT LIKE 'sub_test_%'),
+                (SELECT COALESCE(SUM(CASE WHEN plan_id = 'premium' THEN 9.99 WHEN plan_id = 'vip' THEN 19.99 WHEN plan_id = 'black' THEN 49.99 ELSE 0.0 END), 0.0) FROM public.subscriptions WHERE status = 'active' AND plan_id NOT IN ('free', 'default') AND stripe_subscription_id IS NOT NULL AND stripe_subscription_id NOT LIKE 'sub_test_%'),
+                (SELECT COUNT(*) FROM public.user_feedback WHERE status = 'pending')
+            """
+            rows = conn.run(query)
+            r = rows[0] if rows else [0] * 18
 
-            # 2. Utilisateurs actifs (24h et 7 jours)
-            rows_act_24h = conn.run(
-                """
-                SELECT COUNT(DISTINCT user_id)
-                FROM public.chat_messages
-                WHERE created_at >= NOW() - INTERVAL '24 hours'
-                """
-            )
-            active_24h = int(rows_act_24h[0][0]) if rows_act_24h else 0
+            total_users = int(r[0])
+            free_users = int(r[1])
+            premium_users = int(r[2])
+            vip_users = int(r[3])
+            black_users = int(r[4])
+            suspended_users = int(r[5])
+            blocked_users = int(r[6])
+            online_users = int(r[7])
+            active_24h = int(r[8])
+            active_7d = int(r[9])
+            total_conversations = int(r[10])
+            total_messages = int(r[11])
+            total_attachments = int(r[12])
+            total_tokens = int(r[13])
+            gemini_requests_today = int(r[14])
+            active_subs = int(r[15])
+            mrr_eur = round(float(r[16]), 2)
+            pending_feedback = int(r[17])
 
-            rows_act_7d = conn.run(
-                """
-                SELECT COUNT(DISTINCT user_id)
-                FROM public.chat_messages
-                WHERE created_at >= NOW() - INTERVAL '7 days'
-                """
-            )
-            active_7d = int(rows_act_7d[0][0]) if rows_act_7d else 0
-
-            # 3. Conversations & Messages & Pièces jointes
-            rows_convs = conn.run("SELECT COUNT(*) FROM public.chat_conversations")
-            total_conversations = int(rows_convs[0][0]) if rows_convs else 0
-
-            rows_msgs = conn.run("SELECT COUNT(*) FROM public.chat_messages")
-            total_messages = int(rows_msgs[0][0]) if rows_msgs else 0
-
-            rows_atts = conn.run("SELECT COUNT(*) FROM public.chat_attachments")
-            total_attachments = int(rows_atts[0][0]) if rows_atts else 0
-
-            # 4. Consommation IA du jour & Tokens estimés
-            rows_tokens = conn.run(
-                """
-                SELECT
-                    COALESCE(SUM(tokens_used), 0),
-                    COALESCE(SUM(messages_sent), 0)
-                FROM public.chat_user_usage
-                WHERE period_start = CURRENT_DATE
-                """
-            )
-            total_tokens = int(rows_tokens[0][0]) if rows_tokens else 0
-            gemini_requests_today = int(rows_tokens[0][1]) if rows_tokens else 0
-
-            # 5. Abonnements Stripe actifs et MRR
-            rows_sub = conn.run(
-                """
-                SELECT COUNT(*)
-                FROM public.subscriptions
-                WHERE status = 'active'
-                """
-            )
-            active_subs = int(rows_sub[0][0]) if rows_sub else 0
-            mrr_eur = round(active_subs * 19.99, 2)
-
-            # 6. Commentaires en attente
-            rows_fb = conn.run("SELECT COUNT(*) FROM public.user_feedback WHERE status = 'pending'")
-            pending_feedback = int(rows_fb[0][0]) if rows_fb else 0
-
-            # 7. Alertes réelles non résolues
+            # Alertes réelles non résolues
             alerts_data = AdminService.get_alerts()
             unread_alerts = alerts_data.get("total_unread", 0)
 
