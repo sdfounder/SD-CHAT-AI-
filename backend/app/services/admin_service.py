@@ -546,9 +546,12 @@ class AdminService:
             mrr_eur = round(float(r[16]), 2)
             pending_feedback = int(r[17])
 
-            # Alertes réelles non résolues
+        # Alertes réelles non résolues (hors transaction pour éviter les collisions de pooler)
+        try:
             alerts_data = AdminService.get_alerts()
             unread_alerts = alerts_data.get("total_unread", 0)
+        except Exception:
+            unread_alerts = 0
 
         return AdminStatsResponse(
             total_users=total_users,
@@ -1870,18 +1873,19 @@ class AdminService:
         alerts: List[AdminAlertItem] = []
 
         with db_manager.connect() as conn:
-            # 1. Alerte Taux d'erreurs élevé (dernière heure)
-            err_rows = conn.run(
+            combined = conn.run(
                 """
-                SELECT COUNT(*), error_type
-                FROM public.system_error_logs
-                WHERE created_at >= NOW() - INTERVAL '1 hour'
-                GROUP BY error_type
-                ORDER BY COUNT(*) DESC
-                LIMIT 3
+                SELECT
+                    (SELECT COUNT(*) FROM public.system_error_logs WHERE created_at >= NOW() - INTERVAL '1 hour'),
+                    (SELECT COUNT(*) FROM public.user_feedback WHERE status = 'pending' AND created_at <= NOW() - INTERVAL '24 hours'),
+                    (SELECT value FROM public.system_settings WHERE key = 'maintenance_mode' LIMIT 1)
                 """
             )
-            total_err_1h = sum(int(r[0]) for r in err_rows) if err_rows else 0
+            c_row = combined[0] if combined else [0, 0, None]
+            total_err_1h = int(c_row[0] or 0)
+            fb_old_count = int(c_row[1] or 0)
+            maint_val = c_row[2]
+
             if total_err_1h >= 5:
                 alerts.append(
                     AdminAlertItem(
@@ -1889,21 +1893,12 @@ class AdminService:
                         type="high_errors",
                         priority="critical" if total_err_1h >= 20 else "warning",
                         title=f"Pic d'erreurs système détecté ({total_err_1h} erreurs / 1h)",
-                        message=f"{total_err_1h} erreurs enregistrées dans la dernière heure. Principaux types: {', '.join(str(r[1]) for r in err_rows)}.",
+                        message=f"{total_err_1h} erreurs enregistrées dans la dernière heure.",
                         details={"error_count": total_err_1h},
                         created_at=now_dt,
                     )
                 )
 
-            # 2. Alerte Commentaires d'assistance non résolus (> 24h)
-            fb_pending = conn.run(
-                """
-                SELECT COUNT(*)
-                FROM public.user_feedback
-                WHERE status = 'pending' AND created_at <= NOW() - INTERVAL '24 hours'
-                """
-            )
-            fb_old_count = int(fb_pending[0][0]) if fb_pending else 0
             if fb_old_count > 0:
                 alerts.append(
                     AdminAlertItem(
@@ -1917,11 +1912,9 @@ class AdminService:
                     )
                 )
 
-            # 3. Alerte Mode Maintenance Actif
-            maint_rows = conn.run("SELECT value FROM public.system_settings WHERE key = 'maintenance_mode'")
-            if maint_rows and maint_rows[0][0]:
-                val = maint_rows[0][0]
+            if maint_val:
                 import json
+                val = maint_val
                 if isinstance(val, str):
                     try:
                         val = json.loads(val)
